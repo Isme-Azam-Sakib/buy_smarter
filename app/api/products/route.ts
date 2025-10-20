@@ -39,11 +39,17 @@ export async function GET(request: Request) {
     }
 
     // Get total count
-    const countResult = await all(`SELECT COUNT(*) as count FROM master_products ${whereClause}`, params)
-    const totalCount = countResult[0].count
+    const countQuery = `SELECT COUNT(*) as count FROM master_products ${whereClause}`
+    const countResult = await new Promise((resolve, reject) => {
+      db.all(countQuery, params, (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows)
+      })
+    })
+    const totalCount = (countResult as any[])[0].count
 
     // Get products with pagination
-    const products = await all(`
+    const productsQuery = `
       SELECT 
         productId,
         standardName,
@@ -58,11 +64,17 @@ export async function GET(request: Request) {
       ${whereClause}
       ORDER BY standardName ASC
       LIMIT ? OFFSET ?
-    `, [...params, limit, skip])
+    `
+    const products = await new Promise((resolve, reject) => {
+      db.all(productsQuery, [...params, limit, skip], (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows)
+      })
+    }) as any[]
 
     // Get price entries for each product
     const productsWithPrices = await Promise.all(products.map(async (product) => {
-      const priceEntries = await all(`
+      const priceEntriesQuery = `
         SELECT 
           pe.id,
           pe.scrapedPrice,
@@ -75,7 +87,13 @@ export async function GET(request: Request) {
         JOIN vendors v ON pe.vendorId = v.vendorId
         WHERE pe.masterProductId = ?
         ORDER BY pe.scrapedPrice ASC
-      `, [product.productId])
+      `
+      const priceEntries = await new Promise((resolve, reject) => {
+        db.all(priceEntriesQuery, [product.productId], (err, rows) => {
+          if (err) reject(err)
+          else resolve(rows)
+        })
+      }) as any[]
 
       return {
         ...product,
@@ -96,19 +114,31 @@ export async function GET(request: Request) {
     }))
 
     // Get category and brand statistics
-    const categoryStats = await all(`
+    const categoryStatsQuery = `
       SELECT category, COUNT(*) as count 
       FROM master_products 
       GROUP BY category 
       ORDER BY count DESC
-    `)
+    `
+    const categoryStats = await new Promise((resolve, reject) => {
+      db.all(categoryStatsQuery, [], (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows)
+      })
+    }) as any[]
 
-    const brandStats = await all(`
+    const brandStatsQuery = `
       SELECT brand, COUNT(*) as count 
       FROM master_products 
       GROUP BY brand 
       ORDER BY count DESC
-    `)
+    `
+    const brandStats = await new Promise((resolve, reject) => {
+      db.all(brandStatsQuery, [], (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows)
+      })
+    }) as any[]
 
     db.close()
 
