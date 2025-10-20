@@ -4,6 +4,7 @@ import { promisify } from 'util'
 import path from 'path'
 
 export async function GET() {
+  // Force new deployment
   try {
     const dbPath = path.join(process.cwd(), 'backend', 'buysmarter.db')
     const db = new sqlite3.Database(dbPath)
