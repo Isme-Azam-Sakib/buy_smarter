@@ -11,33 +11,62 @@ export async function GET() {
     const get = promisify(db.get.bind(db))
 
     // Get total counts
-    const totalProducts = await get('SELECT COUNT(*) as count FROM master_products')
-    const totalVendors = await get('SELECT COUNT(*) as count FROM vendors')
-    const totalPriceEntries = await get('SELECT COUNT(*) as count FROM price_entries')
+    const totalProductsResult = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM master_products', (err, row) => {
+        if (err) reject(err)
+        else resolve(row)
+      })
+    }) as any
+
+    const totalVendorsResult = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM vendors', (err, row) => {
+        if (err) reject(err)
+        else resolve(row)
+      })
+    }) as any
+
+    const totalPriceEntriesResult = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM price_entries', (err, row) => {
+        if (err) reject(err)
+        else resolve(row)
+      })
+    }) as any
 
     // Get category stats
-    const categoryStats = await all(`
+    const categoryStatsQuery = `
       SELECT category, COUNT(*) as count 
       FROM master_products 
       GROUP BY category 
       ORDER BY count DESC
-    `)
+    `
+    const categoryStats = await new Promise((resolve, reject) => {
+      db.all(categoryStatsQuery, [], (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows)
+      })
+    }) as any[]
 
     // Get brand stats
-    const brandStats = await all(`
+    const brandStatsQuery = `
       SELECT brand, COUNT(*) as count 
       FROM master_products 
       GROUP BY brand 
       ORDER BY count DESC 
       LIMIT 5
-    `)
+    `
+    const brandStats = await new Promise((resolve, reject) => {
+      db.all(brandStatsQuery, [], (err, rows) => {
+        if (err) reject(err)
+        else resolve(rows)
+      })
+    }) as any[]
 
     db.close()
 
     return NextResponse.json({
-      totalProducts: totalProducts.count,
-      totalVendors: totalVendors.count,
-      totalPriceEntries: totalPriceEntries.count,
+      totalProducts: totalProductsResult.count,
+      totalVendors: totalVendorsResult.count,
+      totalPriceEntries: totalPriceEntriesResult.count,
       topCategories: categoryStats.map(stat => ({
         category: stat.category,
         count: stat.count
