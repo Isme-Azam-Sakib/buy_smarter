@@ -39,8 +39,8 @@ export async function GET(request: Request) {
     }
 
     // Get total count
-    const countResult = await get(`SELECT COUNT(*) as count FROM master_products ${whereClause}`, params)
-    const totalCount = countResult.count
+    const countResult = await all(`SELECT COUNT(*) as count FROM master_products ${whereClause}`, params)
+    const totalCount = countResult[0].count
 
     // Get products with pagination
     const products = await all(`
