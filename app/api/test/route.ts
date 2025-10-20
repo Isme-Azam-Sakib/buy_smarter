@@ -13,22 +13,32 @@ export async function GET() {
     const all = promisify(db.all.bind(db))
 
     // Test connection
-    const count = await get('SELECT COUNT(*) as count FROM master_products')
+    const countResult = await new Promise((resolve, reject) => {
+      db.get('SELECT COUNT(*) as count FROM master_products', (err, row) => {
+        if (err) reject(err)
+        else resolve(row)
+      })
+    }) as any
     
     // Get a sample product
-    const sampleProduct = await get(`
-      SELECT productId, standardName, brand, category, currentCheapestPrice 
-      FROM master_products 
-      LIMIT 1
-    `)
+    const sampleProductResult = await new Promise((resolve, reject) => {
+      db.get(`
+        SELECT productId, standardName, brand, category, currentCheapestPrice 
+        FROM master_products 
+        LIMIT 1
+      `, (err, row) => {
+        if (err) reject(err)
+        else resolve(row)
+      })
+    }) as any
 
     db.close()
 
     return NextResponse.json({
       success: true,
       message: 'Database connection successful',
-      totalProducts: count.count,
-      sampleProduct
+      totalProducts: countResult.count,
+      sampleProduct: sampleProductResult
     })
 
   } catch (error) {
