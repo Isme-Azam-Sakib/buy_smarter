@@ -1,0 +1,183 @@
+import { NextResponse } from 'next/server'
+import { getDatabase } from '@/lib/database'
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url)
+    const search = searchParams.get('search')
+    const brand = searchParams.get('brand')
+    const limit = parseInt(searchParams.get('limit') || '12')
+    const page = parseInt(searchParams.get('page') || '1')
+    const skip = (page - 1) * limit
+
+    const db = await getDatabase()
+
+    // Build WHERE clause
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
+
+    if (search) {
+      whereClause += ' AND (standard_name ILIKE ? OR raw_name ILIKE ? OR brand ILIKE ?)'
+      const searchTerm = `%${search}%`
+      params.push(searchTerm, searchTerm, searchTerm)
+    }
+    
+    if (brand) {
+      whereClause += ' AND brand = ?'
+      params.push(brand)
+    }
+
+    // Get all products first (for AI grouping simulation)
+    const allProductsQuery = `
+      SELECT 
+        id,
+        standard_name,
+        brand,
+        vendor_name,
+        raw_name,
+        price_bdt,
+        availability_status,
+        product_url,
+        image_url,
+        description,
+        scraped_at
+      FROM cpu_products 
+      ${whereClause}
+      AND price_bdt IS NOT NULL 
+      AND price_bdt > 0
+      ORDER BY raw_name ASC
+    `
+
+    const allProducts = await db.query(allProductsQuery, params)
+
+    // Simulate AI grouping by grouping similar products
+    const groupedProducts = groupProductsByAI(allProducts)
+
+    // Apply search and brand filters to grouped products
+    let filteredProducts = groupedProducts
+
+    if (search) {
+      filteredProducts = filteredProducts.filter(product => 
+        product.standard_name.toLowerCase().includes(search.toLowerCase()) ||
+        product.raw_names.some((name: string) => name.toLowerCase().includes(search.toLowerCase())) ||
+        product.brand.toLowerCase().includes(search.toLowerCase())
+      )
+    }
+
+    if (brand) {
+      filteredProducts = filteredProducts.filter(product => 
+        product.brand.toLowerCase() === brand.toLowerCase()
+      )
+    }
+
+    // Get unique brands for filter
+    const uniqueBrands = Array.from(new Set(groupedProducts.map(p => p.brand)))
+    const brands = uniqueBrands.map(brand => ({
+      brand,
+      count: groupedProducts.filter(p => p.brand === brand).length
+    }))
+
+    // Apply pagination
+    const total = filteredProducts.length
+    const totalPages = Math.ceil(total / limit)
+    const startIndex = (page - 1) * limit
+    const paginatedProducts = filteredProducts.slice(startIndex, startIndex + limit)
+
+    await db.close()
+
+    return NextResponse.json({
+      products: paginatedProducts,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages
+      },
+      stats: {
+        brands
+      }
+    })
+
+  } catch (error) {
+    console.error('Error fetching AI products:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch AI products' },
+      { status: 500 }
+    )
+  }
+}
+
+// Simulate AI grouping by grouping products with similar names
+function groupProductsByAI(products: any[]) {
+  const groupedProducts: { [key: string]: any } = {}
+  
+  for (const product of products) {
+    // Simple AI-like grouping: group by first 3 words of raw_name
+    const words = product.raw_name.split(' ').slice(0, 3).join(' ')
+    const standardName = words
+    
+    if (!groupedProducts[standardName]) {
+      groupedProducts[standardName] = {
+        id: standardName,
+        standard_name: standardName,
+        brand: extractBrand(standardName),
+        raw_names: [],
+        min_price: product.price_bdt,
+        max_price: product.price_bdt,
+        avg_price: product.price_bdt,
+        vendor_count: 0,
+        total_listings: 0,
+        vendors: [],
+        images: [],
+        price_entries: [],
+        ai_confidence: 0.85 // Simulate AI confidence
+      }
+    }
+
+    // Add to grouped product
+    const grouped = groupedProducts[standardName]
+    grouped.raw_names.push(product.raw_name)
+    grouped.min_price = Math.min(grouped.min_price, product.price_bdt)
+    grouped.max_price = Math.max(grouped.max_price, product.price_bdt)
+    grouped.vendor_count = new Set([...grouped.vendors, product.vendor_name]).size
+    grouped.total_listings += 1
+    grouped.vendors = Array.from(new Set([...grouped.vendors, product.vendor_name]))
+    if (product.image_url) {
+      grouped.images.push(product.image_url)
+    }
+    grouped.images = Array.from(new Set(grouped.images))
+    grouped.price_entries.push({
+      id: product.id,
+      vendor_name: product.vendor_name,
+      raw_name: product.raw_name,
+      price_bdt: product.price_bdt,
+      availability_status: product.availability_status,
+      product_url: product.product_url,
+      image_url: product.image_url,
+      scraped_at: product.scraped_at,
+      description: product.description
+    })
+  }
+
+  // Calculate average prices and sort
+  const result = Object.values(groupedProducts).map((product: any) => {
+    product.avg_price = product.price_entries.reduce((sum: number, entry: any) => sum + entry.price_bdt, 0) / product.price_entries.length
+    return product
+  })
+
+  // Sort by vendor count (descending) then by min price (ascending)
+  return result.sort((a: any, b: any) => {
+    if (b.vendor_count !== a.vendor_count) {
+      return b.vendor_count - a.vendor_count
+    }
+    return a.min_price - b.min_price
+  })
+}
+
+function extractBrand(standardName: string): string {
+  if (standardName.toLowerCase().includes('intel')) return 'Intel'
+  if (standardName.toLowerCase().includes('amd')) return 'AMD'
+  if (standardName.toLowerCase().includes('ryzen')) return 'AMD'
+  if (standardName.toLowerCase().includes('core')) return 'Intel'
+  return 'Unknown'
+}

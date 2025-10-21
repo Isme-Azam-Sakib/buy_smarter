@@ -30,7 +30,7 @@ export default function AIProducts({ searchQuery = '' }: CPUProductsProps) {
         ...(brand && { brand })
       })
 
-      const response = await fetch(`/api/ai-products-simple?${params}`)
+      const response = await fetch(`/api/ai-products-pg?${params}`)
       const data = await response.json()
 
       if (data.error) {
@@ -60,7 +60,7 @@ export default function AIProducts({ searchQuery = '' }: CPUProductsProps) {
   const handleProductClick = (product: CPUProduct) => {
     // Use the AI-generated standard name as the ID
     const productId = encodeURIComponent(product.standard_name)
-    router.push(`/ai-products/${productId}`)
+    router.push(`/ai-products-pg/${productId}`)
   }
 
   const handlePageChange = (newPage: number) => {
