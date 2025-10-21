@@ -23,7 +23,7 @@ export async function GET(
         STRING_AGG(DISTINCT vendor_name, ',') as vendors,
         STRING_AGG(DISTINCT image_url, ',') as images
       FROM cpu_products 
-      WHERE standard_name = ? 
+      WHERE standard_name = $1 
         AND price_bdt IS NOT NULL 
         AND price_bdt > 0
       GROUP BY standard_name, brand
@@ -44,7 +44,7 @@ export async function GET(
           STRING_AGG(DISTINCT vendor_name, ',') as vendors,
           STRING_AGG(DISTINCT image_url, ',') as images
         FROM cpu_products 
-        WHERE raw_name = ? 
+        WHERE raw_name = $1 
           AND price_bdt IS NOT NULL 
           AND price_bdt > 0
         GROUP BY standard_name, brand
@@ -73,7 +73,7 @@ export async function GET(
         scraped_at,
         description
       FROM cpu_products 
-      WHERE standard_name = ? OR raw_name = ?
+      WHERE (standard_name = $1 OR raw_name = $2)
         AND price_bdt IS NOT NULL 
         AND price_bdt > 0
       ORDER BY price_bdt ASC

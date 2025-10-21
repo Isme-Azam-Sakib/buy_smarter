@@ -9,20 +9,22 @@ export class DatabaseAdapter {
   private isPostgres: boolean
 
   constructor() {
-    // Use PostgreSQL only in production
-    // In development, always use SQLite
-    this.isPostgres = process.env.NODE_ENV === 'production'
+    // Always use PostgreSQL (Neon) for both development and production
+    this.isPostgres = true
   }
 
   async connect() {
     if (this.isPostgres) {
-      // Use PostgreSQL in production
+      // Use PostgreSQL (Neon) - hardcoded for now
+      const connectionString = process.env.DATABASE_URL || "postgresql://neondb_owner:npg_qF5HuDTGX6LI@ep-icy-frost-ad6vx0uq-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require"
+      
+      console.log('Connecting to PostgreSQL with URL:', connectionString.substring(0, 50) + '...')
       this.client = new Client({
-        connectionString: process.env.DATABASE_URL,
+        connectionString: connectionString,
         ssl: { rejectUnauthorized: false }
       })
       await this.client.connect()
-      console.log('Connected to PostgreSQL')
+      console.log('Connected to PostgreSQL successfully')
     } else {
       // Use SQLite in development
       const dbPath = path.join(process.cwd(), 'cpu_products.db')

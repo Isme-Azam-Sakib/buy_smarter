@@ -3,6 +3,7 @@ import { getDatabase } from '@/lib/database'
 
 export async function GET(request: Request) {
   try {
+    console.log('AI Products PG API called')
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search')
     const brand = searchParams.get('brand')
@@ -10,20 +11,23 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get('page') || '1')
     const skip = (page - 1) * limit
 
+    console.log('Connecting to database...')
     const db = await getDatabase()
+    console.log('Database connected successfully')
 
     // Build WHERE clause
     let whereClause = 'WHERE 1=1'
     const params: any[] = []
 
     if (search) {
-      whereClause += ' AND (standard_name ILIKE ? OR raw_name ILIKE ? OR brand ILIKE ?)'
+      // Always use ILIKE for PostgreSQL
+      whereClause += ` AND (standard_name ILIKE $${params.length + 1} OR raw_name ILIKE $${params.length + 2} OR brand ILIKE $${params.length + 3})`
       const searchTerm = `%${search}%`
       params.push(searchTerm, searchTerm, searchTerm)
     }
     
     if (brand) {
-      whereClause += ' AND brand = ?'
+      whereClause += ` AND brand = $${params.length + 1}`
       params.push(brand)
     }
 
@@ -48,10 +52,23 @@ export async function GET(request: Request) {
       ORDER BY raw_name ASC
     `
 
+    console.log('Fetching products with query:', allProductsQuery)
+    console.log('Query params:', params)
     const allProducts = await db.query(allProductsQuery, params)
+    console.log('Fetched products count:', allProducts.length)
+    
+    // Debug: Show sample products and prices
+    if (allProducts.length > 0) {
+      console.log('Sample product prices:', allProducts.slice(0, 3).map(p => ({ 
+        name: p.raw_name, 
+        price: p.price_bdt, 
+        standard_name: p.standard_name 
+      })))
+    }
 
     // Simulate AI grouping by grouping similar products
     const groupedProducts = groupProductsByAI(allProducts)
+    console.log('Grouped products count:', groupedProducts.length)
 
     // Apply search and brand filters to grouped products
     let filteredProducts = groupedProducts
@@ -112,9 +129,12 @@ function groupProductsByAI(products: any[]) {
   const groupedProducts: { [key: string]: any } = {}
   
   for (const product of products) {
-    // Simple AI-like grouping: group by first 3 words of raw_name
-    const words = product.raw_name.split(' ').slice(0, 3).join(' ')
-    const standardName = words
+    // Better AI-like grouping: use standard_name if available, otherwise use first 4 words
+    let standardName = product.standard_name
+    if (!standardName || standardName.trim() === '') {
+      const words = product.raw_name.split(' ').slice(0, 4).join(' ')
+      standardName = words
+    }
     
     if (!groupedProducts[standardName]) {
       groupedProducts[standardName] = {
@@ -137,8 +157,13 @@ function groupProductsByAI(products: any[]) {
     // Add to grouped product
     const grouped = groupedProducts[standardName]
     grouped.raw_names.push(product.raw_name)
-    grouped.min_price = Math.min(grouped.min_price, product.price_bdt)
-    grouped.max_price = Math.max(grouped.max_price, product.price_bdt)
+    
+    // Debug price calculation
+    if (product.price_bdt && product.price_bdt > 0) {
+      grouped.min_price = Math.min(grouped.min_price, product.price_bdt)
+      grouped.max_price = Math.max(grouped.max_price, product.price_bdt)
+    }
+    
     grouped.vendor_count = new Set([...grouped.vendors, product.vendor_name]).size
     grouped.total_listings += 1
     grouped.vendors = Array.from(new Set([...grouped.vendors, product.vendor_name]))
@@ -162,6 +187,10 @@ function groupProductsByAI(products: any[]) {
   // Calculate average prices and sort
   const result = Object.values(groupedProducts).map((product: any) => {
     product.avg_price = product.price_entries.reduce((sum: number, entry: any) => sum + entry.price_bdt, 0) / product.price_entries.length
+    
+    // Debug: Log price information
+    console.log(`Product: ${product.standard_name}, Min: ${product.min_price}, Max: ${product.max_price}, Avg: ${product.avg_price}, Entries: ${product.price_entries.length}`)
+    
     return product
   })
 
