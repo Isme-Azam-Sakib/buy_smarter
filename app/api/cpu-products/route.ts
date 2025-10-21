@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server'
-import sqlite3 from 'sqlite3'
-import { promisify } from 'util'
-import path from 'path'
+import { getDatabase } from '@/lib/database'
 
 export async function GET(request: Request) {
   try {
@@ -12,34 +10,27 @@ export async function GET(request: Request) {
     const page = parseInt(searchParams.get('page') || '1')
     const skip = (page - 1) * limit
 
-    const dbPath = path.join(process.cwd(), 'cpu_products.db')
-    const db = new sqlite3.Database(dbPath)
-    const all = promisify(db.all.bind(db))
+    const db = await getDatabase()
 
     // Build WHERE clause
     let whereClause = 'WHERE 1=1'
     const params: any[] = []
 
     if (search) {
-      whereClause += ' AND (standard_name LIKE ? OR raw_name LIKE ? OR brand LIKE ?)'
+      whereClause += ` AND (standard_name ILIKE $${params.length + 1} OR raw_name ILIKE $${params.length + 2} OR brand ILIKE $${params.length + 3})`
       const searchTerm = `%${search}%`
       params.push(searchTerm, searchTerm, searchTerm)
     }
     
     if (brand) {
-      whereClause += ' AND brand = ?'
+      whereClause += ` AND brand = $${params.length + 1}`
       params.push(brand)
     }
 
     // Get total count
     const countQuery = `SELECT COUNT(DISTINCT standard_name) as count FROM cpu_products ${whereClause}`
-    const countResult = await new Promise((resolve, reject) => {
-      db.all(countQuery, params, (err: any, rows: any) => {
-        if (err) reject(err)
-        else resolve(rows)
-      })
-    })
-    const totalCount = (countResult as any[])[0].count
+    const countResult = await db.query(countQuery, params)
+    const totalCount = countResult[0].count
 
     // Get unique CPU products with their best prices
     const productsQuery = `
@@ -51,22 +42,17 @@ export async function GET(request: Request) {
         AVG(price_bdt) as avg_price,
         COUNT(DISTINCT vendor_name) as vendor_count,
         COUNT(*) as total_listings,
-        GROUP_CONCAT(DISTINCT vendor_name) as vendors,
-        GROUP_CONCAT(DISTINCT image_url) as images
+        STRING_AGG(DISTINCT vendor_name, ',') as vendors,
+        STRING_AGG(DISTINCT image_url, ',') as images
       FROM cpu_products 
       ${whereClause}
       AND price_bdt IS NOT NULL 
       AND price_bdt > 0
       GROUP BY standard_name, brand
       ORDER BY vendor_count DESC, min_price ASC
-      LIMIT ? OFFSET ?
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
     `
-    const products = await new Promise((resolve, reject) => {
-      db.all(productsQuery, [...params, limit, skip], (err: any, rows: any) => {
-        if (err) reject(err)
-        else resolve(rows)
-      })
-    }) as any[]
+    const products = await db.query(productsQuery, [...params, limit, skip])
 
     // Get detailed price entries for each product
     const productsWithPrices = await Promise.all(products.map(async (product) => {
@@ -81,15 +67,10 @@ export async function GET(request: Request) {
           image_url,
           scraped_at
         FROM cpu_products 
-        WHERE standard_name = ? AND price_bdt IS NOT NULL AND price_bdt > 0
+        WHERE standard_name = $1 AND price_bdt IS NOT NULL AND price_bdt > 0
         ORDER BY price_bdt ASC
       `
-      const priceEntries = await new Promise((resolve, reject) => {
-        db.all(priceEntriesQuery, [product.standard_name], (err: any, rows: any) => {
-          if (err) reject(err)
-          else resolve(rows)
-        })
-      }) as any[]
+      const priceEntries = await db.query(priceEntriesQuery, [product.standard_name])
 
       return {
         id: product.standard_name, // Use standard_name as unique ID
@@ -123,14 +104,9 @@ export async function GET(request: Request) {
       GROUP BY brand 
       ORDER BY count DESC
     `
-    const brandStats = await new Promise((resolve, reject) => {
-      db.all(brandStatsQuery, [], (err: any, rows: any) => {
-        if (err) reject(err)
-        else resolve(rows)
-      })
-    }) as any[]
+    const brandStats = await db.query(brandStatsQuery, [])
 
-    db.close()
+    await db.close()
 
     return NextResponse.json({
       products: productsWithPrices,
