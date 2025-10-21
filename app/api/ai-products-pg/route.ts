@@ -1,6 +1,50 @@
 import { NextResponse } from 'next/server'
 import { getDatabase } from '@/lib/database'
 
+// Type for raw database product
+interface RawProduct {
+  id: string
+  standard_name: string
+  brand: string
+  vendor_name: string
+  raw_name: string
+  price_bdt: number
+  availability_status: string
+  product_url: string
+  image_url: string
+  description: string
+  scraped_at: string
+}
+
+// Type for grouped product
+interface GroupedProduct {
+  id: string
+  standard_name: string
+  brand: string
+  raw_names: string[]
+  min_price: number
+  max_price: number
+  avg_price: number
+  vendor_count: number
+  total_listings: number
+  vendors: string[]
+  images: string[]
+  price_entries: PriceEntry[]
+  ai_confidence: number
+}
+
+interface PriceEntry {
+  id: string
+  vendor_name: string
+  raw_name: string
+  price_bdt: number
+  availability_status: string
+  product_url: string
+  image_url: string
+  scraped_at: string
+  description: string
+}
+
 export async function GET(request: Request) {
   try {
     console.log('AI Products PG API called')
@@ -59,7 +103,7 @@ export async function GET(request: Request) {
     
     // Debug: Show sample products and prices
     if (allProducts.length > 0) {
-      console.log('Sample product prices:', allProducts.slice(0, 3).map(p => ({ 
+      console.log('Sample product prices:', allProducts.slice(0, 3).map((p: RawProduct) => ({ 
         name: p.raw_name, 
         price: p.price_bdt, 
         standard_name: p.standard_name 
@@ -125,8 +169,8 @@ export async function GET(request: Request) {
 }
 
 // Simulate AI grouping by grouping products with similar names
-function groupProductsByAI(products: any[]) {
-  const groupedProducts: { [key: string]: any } = {}
+function groupProductsByAI(products: RawProduct[]): GroupedProduct[] {
+  const groupedProducts: { [key: string]: GroupedProduct } = {}
   
   for (const product of products) {
     // Better AI-like grouping: use standard_name if available, otherwise use first 4 words
@@ -185,8 +229,8 @@ function groupProductsByAI(products: any[]) {
   }
 
   // Calculate average prices and sort
-  const result = Object.values(groupedProducts).map((product: any) => {
-    product.avg_price = product.price_entries.reduce((sum: number, entry: any) => sum + entry.price_bdt, 0) / product.price_entries.length
+  const result = Object.values(groupedProducts).map((product: GroupedProduct) => {
+    product.avg_price = product.price_entries.reduce((sum: number, entry: PriceEntry) => sum + entry.price_bdt, 0) / product.price_entries.length
     
     // Debug: Log price information
     console.log(`Product: ${product.standard_name}, Min: ${product.min_price}, Max: ${product.max_price}, Avg: ${product.avg_price}, Entries: ${product.price_entries.length}`)
@@ -195,7 +239,7 @@ function groupProductsByAI(products: any[]) {
   })
 
   // Sort by vendor count (descending) then by min price (ascending)
-  return result.sort((a: any, b: any) => {
+  return result.sort((a: GroupedProduct, b: GroupedProduct) => {
     if (b.vendor_count !== a.vendor_count) {
       return b.vendor_count - a.vendor_count
     }
