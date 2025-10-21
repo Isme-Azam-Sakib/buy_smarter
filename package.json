@@ -9,14 +9,17 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
+    "migrate:postgres": "node scripts/setup-vercel-postgres.js",
     "docker:build": "docker build -t buysmarter-cpu .",
     "docker:run": "docker run -p 3000:3000 -v $(pwd)/cpu_products.db:/app/cpu_products.db buysmarter-cpu"
   },
   "dependencies": {
+    "@types/pg": "^8.15.5",
     "clsx": "^2.0.0",
     "framer-motion": "^10.16.16",
     "lucide-react": "^0.294.0",
     "next": "14.0.4",
+    "pg": "^8.16.3",
     "react": "^18",
     "react-dom": "^18",
     "sqlite": "^5.1.1",
