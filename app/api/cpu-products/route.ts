@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     // Get total count
     const countQuery = `SELECT COUNT(DISTINCT standard_name) as count FROM cpu_products ${whereClause}`
     const countResult = await new Promise((resolve, reject) => {
-      db.all(countQuery, params, (err, rows) => {
+      db.all(countQuery, params, (err: any, rows: any) => {
         if (err) reject(err)
         else resolve(rows)
       })
@@ -62,7 +62,7 @@ export async function GET(request: Request) {
       LIMIT ? OFFSET ?
     `
     const products = await new Promise((resolve, reject) => {
-      db.all(productsQuery, [...params, limit, skip], (err, rows) => {
+      db.all(productsQuery, [...params, limit, skip], (err: any, rows: any) => {
         if (err) reject(err)
         else resolve(rows)
       })
@@ -85,7 +85,7 @@ export async function GET(request: Request) {
         ORDER BY price_bdt ASC
       `
       const priceEntries = await new Promise((resolve, reject) => {
-        db.all(priceEntriesQuery, [product.standard_name], (err, rows) => {
+        db.all(priceEntriesQuery, [product.standard_name], (err: any, rows: any) => {
           if (err) reject(err)
           else resolve(rows)
         })
@@ -124,7 +124,7 @@ export async function GET(request: Request) {
       ORDER BY count DESC
     `
     const brandStats = await new Promise((resolve, reject) => {
-      db.all(brandStatsQuery, [], (err, rows) => {
+      db.all(brandStatsQuery, [], (err: any, rows: any) => {
         if (err) reject(err)
         else resolve(rows)
       })

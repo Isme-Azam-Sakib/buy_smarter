@@ -65,7 +65,7 @@ export async function GET(
     `
     
     const priceEntries = await new Promise((resolve, reject) => {
-      db.all(priceEntriesQuery, [productId], (err, rows) => {
+      db.all(priceEntriesQuery, [productId], (err: any, rows: any) => {
         if (err) reject(err)
         else resolve(rows)
       })

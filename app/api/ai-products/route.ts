@@ -73,7 +73,8 @@ export async function GET(request: Request) {
     }
 
     // Get unique brands for filter
-    const brands = [...new Set(aiGroupedProducts.map(p => p.brand))].map(brand => ({
+    const uniqueBrands = Array.from(new Set(aiGroupedProducts.map(p => p.brand)))
+    const brands = uniqueBrands.map(brand => ({
       brand,
       count: aiGroupedProducts.filter(p => p.brand === brand).length
     }))
@@ -153,11 +154,11 @@ async function groupProductsWithAI(products: any[]) {
       grouped.max_price = Math.max(grouped.max_price, product.price_bdt)
       grouped.vendor_count = new Set([...grouped.vendors, product.vendor_name]).size
       grouped.total_listings += 1
-      grouped.vendors = [...new Set([...grouped.vendors, product.vendor_name])]
+      grouped.vendors = Array.from(new Set([...grouped.vendors, product.vendor_name]))
       if (product.image_url) {
         grouped.images.push(product.image_url)
       }
-      grouped.images = [...new Set(grouped.images)]
+      grouped.images = Array.from(new Set(grouped.images))
       grouped.price_entries.push({
         id: product.id,
         vendor_name: product.vendor_name,
@@ -308,11 +309,11 @@ function fallbackGroupProducts(products: any[]) {
     grouped.max_price = Math.max(grouped.max_price, product.price_bdt)
     grouped.vendor_count = new Set([...grouped.vendors, product.vendor_name]).size
     grouped.total_listings += 1
-    grouped.vendors = [...new Set([...grouped.vendors, product.vendor_name])]
+    grouped.vendors = Array.from(new Set([...grouped.vendors, product.vendor_name]))
     if (product.image_url) {
       grouped.images.push(product.image_url)
     }
-    grouped.images = [...new Set(grouped.images)]
+    grouped.images = Array.from(new Set(grouped.images))
     grouped.price_entries.push({
       id: product.id,
       vendor_name: product.vendor_name,
