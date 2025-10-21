@@ -5,9 +5,23 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'BuySmarter - PC Parts Price Comparison Bangladesh',
-  description: 'Find the cheapest PC parts prices across Bangladesh. Compare prices from Star Tech, Ryans, TechLand BD, and more.',
-  keywords: 'PC parts, Bangladesh, price comparison, computer hardware, CPU, GPU, RAM, motherboard',
+  title: 'BuySmarter - AI-Powered CPU Price Comparison Bangladesh',
+  description: 'Compare CPU prices across multiple vendors in Bangladesh with our AI-powered product matching system. Find the best deals on Intel and AMD processors.',
+  keywords: ['CPU', 'price comparison', 'Bangladesh', 'AI', 'computer hardware', 'Intel', 'AMD', 'processors'],
+  authors: [{ name: 'BuySmarter Team' }],
+  robots: 'index, follow',
+  metadataBase: new URL('https://buysmarter.vercel.app'),
+  openGraph: {
+    title: 'BuySmarter - AI-Powered CPU Price Comparison',
+    description: 'Compare CPU prices across multiple vendors in Bangladesh with our AI-powered product matching system.',
+    type: 'website',
+    locale: 'en_US',
+  },
+}
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
 }
 
 export default function RootLayout({

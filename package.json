@@ -1,27 +1,25 @@
 {
-  "name": "buysmarter-pc-parts",
-  "version": "0.1.0",
+  "name": "buysmarter-cpu",
+  "version": "1.0.0",
+  "description": "AI-powered CPU price comparison platform for Bangladesh",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio"
+    "type-check": "tsc --noEmit",
+    "docker:build": "docker build -t buysmarter-cpu .",
+    "docker:run": "docker run -p 3000:3000 -v $(pwd)/cpu_products.db:/app/cpu_products.db buysmarter-cpu"
   },
   "dependencies": {
-    "@prisma/client": "^5.7.1",
-    "axios": "^1.6.2",
     "clsx": "^2.0.0",
     "framer-motion": "^10.16.16",
     "lucide-react": "^0.294.0",
     "next": "14.0.4",
-    "prisma": "^5.7.1",
     "react": "^18",
     "react-dom": "^18",
+    "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7",
     "tailwind-merge": "^2.2.0"
   },
@@ -35,5 +33,15 @@
     "postcss": "^8",
     "tailwindcss": "^3.3.0",
     "typescript": "^5"
-  }
+  },
+  "keywords": [
+    "cpu",
+    "price-comparison",
+    "bangladesh",
+    "ai",
+    "nextjs",
+    "typescript"
+  ],
+  "author": "BuySmarter Team",
+  "license": "MIT"
 }

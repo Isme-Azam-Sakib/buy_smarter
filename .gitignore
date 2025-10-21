@@ -1,8 +1,13 @@
 # Dependencies
 node_modules/
-backend/__pycache__/
-backend/*.pyc
-backend/.pytest_cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js
+.next/
+out/
+build/
 
 # Environment variables
 .env
@@ -11,104 +16,10 @@ backend/.pytest_cache/
 .env.test.local
 .env.production.local
 
-# Next.js
-.next/
-out/
-
-# Production builds
-build/
-dist/
-
 # Database
 *.db
 *.sqlite
-
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.vercel/
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-*.lcov
-
-# nyc test coverage
-.nyc_output
-
-# Dependency directories
-jspm_packages/
-
-# Optional npm cache directory
-.npm
-
-# Optional eslint cache
-.eslintcache
-
-# Microbundle cache
-.rpt2_cache/
-.rts2_cache_cjs/
-.rts2_cache_es/
-.rts2_cache_umd/
-
-# Optional REPL history
-.node_repl_history
-
-# Output of 'npm pack'
-*.tgz
-
-# Yarn Integrity file
-.yarn-integrity
-
-# parcel-bundler cache (https://parceljs.org/)
-.cache
-.parcel-cache
-
-# Next.js build output
-.next
-
-# Nuxt.js build / generate output
-.nuxt
-dist
-
-# Gatsby files
-.cache/
-public
-
-# Storybook build outputs
-.out
-.storybook-out
-
-# Temporary folders
-tmp/
-temp/
-.cursor/
-.agent-tools/
-.pytest_cache/
-
-# Editor directories and files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+*.sqlite3
 
 # Python
 __pycache__/
@@ -122,25 +33,47 @@ ENV/
 env.bak/
 venv.bak/
 
-# Prisma
-prisma/migrations/
-prisma/*.db
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Redis dump
-dump.rdb
+# OS
+.DS_Store
+Thumbs.db
 
-# Scraped data
-scraped_data/
-backend/vendors/*.json
-backend/vendors/*/*.json
-backend/vendors/*_*.json
-backend/scripts/*_output.*
-backend/*.db
-backend/**/buysmarter.db
+# Logs
+logs
+*.log
 
-# Vercel/Next build caches
-.vercel
-.vercel/cache
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-#assets
-masterProducts/
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# Docker
+.dockerignore
+
+# Temporary files
+*.tmp
+*.temp
