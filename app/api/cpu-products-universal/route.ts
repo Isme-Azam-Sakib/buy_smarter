@@ -27,7 +27,11 @@ export async function GET(request: Request) {
       params.push(brand)
     }
 
-    // Get products with pagination
+    // Get products with pagination (works for both SQLite and PostgreSQL)
+    const isPostgres = process.env.NODE_ENV === 'production'
+    const concatFunction = isPostgres ? 'STRING_AGG' : 'GROUP_CONCAT'
+    const concatSeparator = isPostgres ? "','" : "','"
+    
     const productsQuery = `
       SELECT 
         standard_name as id,
@@ -38,8 +42,8 @@ export async function GET(request: Request) {
         AVG(price_bdt) as avg_price,
         COUNT(DISTINCT vendor_name) as vendor_count,
         COUNT(*) as total_listings,
-        GROUP_CONCAT(DISTINCT vendor_name) as vendors,
-        GROUP_CONCAT(DISTINCT image_url) as images
+        ${concatFunction}(DISTINCT vendor_name, ${concatSeparator}) as vendors,
+        ${concatFunction}(DISTINCT image_url, ${concatSeparator}) as images
       FROM cpu_products 
       ${whereClause}
       GROUP BY standard_name, brand

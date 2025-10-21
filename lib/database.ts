@@ -9,7 +9,9 @@ export class DatabaseAdapter {
   private isPostgres: boolean
 
   constructor() {
-    this.isPostgres = process.env.NODE_ENV === 'production' && !!process.env.DATABASE_URL
+    // Use PostgreSQL only in production
+    // In development, always use SQLite
+    this.isPostgres = process.env.NODE_ENV === 'production'
   }
 
   async connect() {

@@ -30,7 +30,7 @@ export default function AIProducts({ searchQuery = '' }: CPUProductsProps) {
         ...(brand && { brand })
       })
 
-      const response = await fetch(`/api/cpu-products-universal?${params}`)
+      const response = await fetch(`/api/ai-products-simple?${params}`)
       const data = await response.json()
 
       if (data.error) {
