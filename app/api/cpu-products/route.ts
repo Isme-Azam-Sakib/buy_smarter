@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     const products = await db.query(productsQuery, [...params, limit, skip])
 
     // Get detailed price entries for each product
-    const productsWithPrices = await Promise.all(products.map(async (product) => {
+    const productsWithPrices = await Promise.all(products.map(async (product: any) => {
       const priceEntriesQuery = `
         SELECT 
           id,
@@ -83,7 +83,7 @@ export async function GET(request: Request) {
         total_listings: product.total_listings,
         vendors: product.vendors.split(','),
         images: product.images ? product.images.split(',').filter((img: string) => img) : [],
-        price_entries: priceEntries.map(entry => ({
+        price_entries: priceEntries.map((entry: any) => ({
           id: entry.id,
           vendor_name: entry.vendor_name,
           raw_name: entry.raw_name,
@@ -117,7 +117,7 @@ export async function GET(request: Request) {
         totalPages: Math.ceil(totalCount / limit)
       },
       stats: {
-        brands: brandStats.map(stat => ({
+        brands: brandStats.map((stat: any) => ({
           brand: stat.brand,
           count: stat.count
         }))
