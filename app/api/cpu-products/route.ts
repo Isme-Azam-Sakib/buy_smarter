@@ -65,7 +65,8 @@ export async function GET(request: Request) {
           availability_status,
           product_url,
           image_url,
-          scraped_at
+          scraped_at,
+          description
         FROM cpu_products 
         WHERE standard_name = $1 AND price_bdt IS NOT NULL AND price_bdt > 0
         ORDER BY price_bdt ASC
@@ -91,7 +92,8 @@ export async function GET(request: Request) {
           availability_status: entry.availability_status,
           product_url: entry.product_url,
           image_url: entry.image_url,
-          scraped_at: entry.scraped_at
+          scraped_at: entry.scraped_at,
+          description: entry.description
         }))
       }
     }))

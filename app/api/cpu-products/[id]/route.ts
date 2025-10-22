@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server'
-import sqlite3 from 'sqlite3'
-import { promisify } from 'util'
-import path from 'path'
+import { getDatabase } from '@/lib/database'
 
 export async function GET(
   request: Request,
@@ -10,8 +8,7 @@ export async function GET(
   try {
     const productId = decodeURIComponent(params.id)
     
-    const dbPath = path.join(process.cwd(), 'cpu_products.db')
-    const db = new sqlite3.Database(dbPath)
+    const db = await getDatabase()
 
     // Get the specific product with all its price entries
     const productQuery = `
@@ -23,24 +20,19 @@ export async function GET(
         AVG(price_bdt) as avg_price,
         COUNT(DISTINCT vendor_name) as vendor_count,
         COUNT(*) as total_listings,
-        GROUP_CONCAT(DISTINCT vendor_name) as vendors,
-        GROUP_CONCAT(DISTINCT image_url) as images
+        STRING_AGG(DISTINCT vendor_name, ',') as vendors,
+        STRING_AGG(DISTINCT image_url, ',') as images
       FROM cpu_products 
-      WHERE standard_name = ? 
+      WHERE standard_name = $1 
         AND price_bdt IS NOT NULL 
         AND price_bdt > 0
       GROUP BY standard_name, brand
     `
     
-    const product = await new Promise((resolve, reject) => {
-      db.get(productQuery, [productId], (err, row) => {
-        if (err) reject(err)
-        else resolve(row)
-      })
-    }) as any
+    const product = await db.get(productQuery, [productId])
 
     if (!product) {
-      db.close()
+      await db.close()
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
@@ -60,18 +52,13 @@ export async function GET(
         scraped_at,
         description
       FROM cpu_products 
-      WHERE standard_name = ? AND price_bdt IS NOT NULL AND price_bdt > 0
+      WHERE standard_name = $1 AND price_bdt IS NOT NULL AND price_bdt > 0
       ORDER BY price_bdt ASC
     `
     
-    const priceEntries = await new Promise((resolve, reject) => {
-      db.all(priceEntriesQuery, [productId], (err: any, rows: any) => {
-        if (err) reject(err)
-        else resolve(rows)
-      })
-    }) as any[]
+    const priceEntries = await db.query(priceEntriesQuery, [productId])
 
-    db.close()
+    await db.close()
 
     const productData = {
       id: product.standard_name,
@@ -84,7 +71,7 @@ export async function GET(
       total_listings: product.total_listings,
       vendors: product.vendors.split(','),
       images: product.images ? product.images.split(',').filter((img: string) => img) : [],
-      price_entries: priceEntries.map(entry => ({
+      price_entries: priceEntries.map((entry: any) => ({
         id: entry.id,
         vendor_name: entry.vendor_name,
         raw_name: entry.raw_name,
