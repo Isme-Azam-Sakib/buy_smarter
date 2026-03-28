@@ -1,0 +1,15 @@
+{
+  "category": "processor",
+  "stats": {
+    "total_samples": 528,
+    "unique_products": 298
+  },
+  "feature_count": 66,
+  "model_type": "RandomForestClassifier",
+  "parameters": {
+    "n_estimators": 200,
+    "max_depth": 20,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2
+  }
+}

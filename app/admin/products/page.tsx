@@ -1,0 +1,11 @@
+'use client'
+
+'use client'
+
+import { redirect } from 'next/navigation'
+
+export const dynamic = 'force-dynamic'
+
+export default function AdminProductsPage() {
+  redirect('/admin/products/list')
+}

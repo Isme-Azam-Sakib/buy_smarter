@@ -1,0 +1,15 @@
+{
+  "category": "ram",
+  "stats": {
+    "total_samples": 1219,
+    "unique_products": 918
+  },
+  "feature_count": 51,
+  "model_type": "RandomForestClassifier",
+  "parameters": {
+    "n_estimators": 200,
+    "max_depth": 20,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2
+  }
+}

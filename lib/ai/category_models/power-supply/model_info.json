@@ -1,0 +1,15 @@
+{
+  "category": "power-supply",
+  "stats": {
+    "total_samples": 985,
+    "unique_products": 764
+  },
+  "feature_count": 50,
+  "model_type": "RandomForestClassifier",
+  "parameters": {
+    "n_estimators": 200,
+    "max_depth": 20,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2
+  }
+}

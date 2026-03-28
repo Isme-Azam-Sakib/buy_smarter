@@ -1,0 +1,15 @@
+{
+  "category": "motherboard",
+  "stats": {
+    "total_samples": 1938,
+    "unique_products": 1320
+  },
+  "feature_count": 52,
+  "model_type": "RandomForestClassifier",
+  "parameters": {
+    "n_estimators": 200,
+    "max_depth": 20,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2
+  }
+}

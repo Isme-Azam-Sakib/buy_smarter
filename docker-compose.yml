@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=sqlite:///./cpu_products.db
+    volumes:
+      - ./cpu_products.db:/app/cpu_products.db
+      - ./lib:/app/lib
+    restart: unless-stopped
