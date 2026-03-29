@@ -88,4 +88,4 @@ backup/
 
 .env.local
 .env.example
-.env
+.envtsconfig.tsbuildinfo
