@@ -69,7 +69,7 @@ function mapVendor(row: any): Vendor | null {
   }
 }
 
-async function ensureVendorColumns(db: any, _isPostgres: boolean) {
+async function ensureVendorColumns(db: any, isPostgres: boolean) {
   if (isPostgres) {
     // Check if columns exist before adding them
     const appsColumns = await db.query(`
