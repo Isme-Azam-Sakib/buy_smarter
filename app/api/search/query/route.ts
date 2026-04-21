@@ -9,6 +9,10 @@ import { CPUProduct } from '@/lib/types'
 let genAI: GoogleGenAI | null = null
 
 const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash']
+const OPENAI_MODELS = [
+  process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  'gpt-4.1-mini',
+]
 const OPENROUTER_MODELS = [
   process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
   'google/gemini-2.0-flash-001',
@@ -148,6 +152,70 @@ function fallbackAnalyzeQuery(query: string) {
 async function generateWithRetryAndFallback(ai: GoogleGenAI | null, contents: string) {
   let lastError: any = null
 
+  const openAiKey = process.env.OPENAI_API_KEY
+  let skipOpenAi = false
+  if (openAiKey) {
+    for (const model of OPENAI_MODELS) {
+      if (skipOpenAi) break
+      for (let attempt = 1; attempt <= AI_MAX_RETRIES; attempt++) {
+        try {
+          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${openAiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: 'user', content: contents }],
+              temperature: 0.2,
+            }),
+          })
+
+          if (!response.ok) {
+            const errText = await response.text()
+            const err: any = new Error(errText || `OpenAI error ${response.status}`)
+            err.status = response.status
+            throw err
+          }
+
+          const data: any = await response.json()
+          const text = data?.choices?.[0]?.message?.content?.trim() || ''
+          if (!text) {
+            throw new Error(`AI response is empty for OpenAI model ${model}`)
+          }
+          return { text, model }
+        } catch (error: any) {
+          lastError = error
+          const errorText = (error?.message || String(error || '')).toLowerCase()
+          const isInsufficientQuota =
+            errorText.includes('insufficient_quota') || errorText.includes('exceeded your current quota')
+          const isAuthError = error?.status === 401 || errorText.includes('invalid_api_key')
+
+          if (isInsufficientQuota || isAuthError) {
+            console.warn(
+              `[Search API] Skipping OpenAI entirely (model=${model}):`,
+              isInsufficientQuota ? 'insufficient quota / no credits' : 'invalid api key'
+            )
+            skipOpenAi = true
+            break
+          }
+
+          const retryable = isHighDemandError(error) || isQuotaError(error)
+          const isLastAttempt = attempt === AI_MAX_RETRIES
+
+          console.warn(
+            `[Search API] OpenAI call failed (model=${model}, attempt=${attempt}/${AI_MAX_RETRIES}):`,
+            error?.message || String(error)
+          )
+
+          if (!retryable || isLastAttempt) break
+          await sleep(attempt * 800)
+        }
+      }
+    }
+  }
+
   const openRouterKey = process.env.OPENROUTER_API_KEY
   if (openRouterKey) {
     for (const model of OPENROUTER_MODELS) {
@@ -282,15 +350,16 @@ export async function POST(request: Request) {
   try {
     console.log('[Search API] Request received')
     
+    const openAiKey = process.env.OPENAI_API_KEY
     const openRouterKey = process.env.OPENROUTER_API_KEY
     const ai = getGenAI()
-    if (!openRouterKey && !ai) {
-      console.error('[Search API] AI not initialized - OPENROUTER_API_KEY/GEMINI_API_KEY missing')
+    if (!openAiKey && !openRouterKey && !ai) {
+      console.error('[Search API] AI not initialized - OPENAI_API_KEY/OPENROUTER_API_KEY/GEMINI_API_KEY missing')
       return NextResponse.json(
         { 
-          error: 'AI service is not configured. Please set OPENROUTER_API_KEY.',
-          message: 'The AI search feature requires an OpenRouter API key. Add OPENROUTER_API_KEY to your .env.local file and restart the server.',
-          details: 'OPENROUTER_API_KEY is missing. Optional fallback: GEMINI_API_KEY.'
+          error: 'AI service is not configured. Please set OPENAI_API_KEY.',
+          message: 'The AI search feature requires an OpenAI API key (primary), with optional OpenRouter/Gemini fallbacks.',
+          details: 'OPENAI_API_KEY is missing. Optional fallbacks: OPENROUTER_API_KEY, GEMINI_API_KEY.'
         },
         { status: 500 }
       )
@@ -334,14 +403,14 @@ export async function POST(request: Request) {
         // Provide helpful error message (differentiate config vs high-demand issues)
         const basePayload: any = {
           error: 'AI service error',
-          details: `AI provider error: ${errorMessage.substring(0, 300)}. Please verify OPENROUTER_API_KEY (or GEMINI_API_KEY fallback) and provider access.`,
+          details: `AI provider error: ${errorMessage.substring(0, 300)}. Please verify OPENAI_API_KEY first, then OPENROUTER_API_KEY, then GEMINI_API_KEY.`,
           message: 'AI service is not available. Please check your API key configuration.',
           rawError: errorMessage,
           troubleshooting: {
-            step1: 'Ensure OPENROUTER_API_KEY is present in .env.local',
-            step2: 'Verify the key is active in your OpenRouter dashboard',
-            step3: 'Check model access/quota for the selected model',
-            step4: 'Optional fallback: set GEMINI_API_KEY for direct Google calls',
+            step1: 'Ensure OPENAI_API_KEY is present and active in .env.local',
+            step2: 'If OpenAI fails, ensure OPENROUTER_API_KEY is present and active',
+            step3: 'Optional final fallback: set GEMINI_API_KEY for direct Google calls',
+            step4: 'Check model access/quota for each provider in order',
             step5: 'Restart your development server after env changes'
           }
         }
@@ -608,7 +677,7 @@ Provide a helpful, conversational response in the same language as the user's qu
     // Handle build requests
     if (aiAnalysis.type === 'build' && aiAnalysis.budget) {
       // Generate build spec using AI (JSON-only, using our exact category IDs)
-      const budgetLimit = aiAnalysis.budget.max || aiAnalysis.budget.min
+      const budgetLimit = aiAnalysis.budget.max || aiAnalysis.budget.min || 0
       const categoryLines = availableCategories
         .map(cat => `- ${cat.id}: ${cat.name} - ${cat.description}`)
         .join('\n')
@@ -701,22 +770,28 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
           filters.push(`availability_status = $${params.length + 1}`)
           params.push('in_stock')
 
-          // Allocate budget proportionally
-          const componentBudget = Math.floor((aiAnalysis.budget.max || aiAnalysis.budget.min) / buildSpec.components.length)
-          filters.push(`price_bdt <= $${params.length + 1}`)
-          params.push(componentBudget * 1.2) // 20% buffer
-
-          // Try to bias towards the specific model or capacity the AI suggested
-          if (modelHint) {
-            const likeValue = `%${modelHint}%`
-            const nameParam = `$${params.length + 1}`
-            const rawParam = `$${params.length + 2}`
-            const brandParam = `$${params.length + 3}`
-            params.push(likeValue, likeValue, likeValue)
-            filters.push(
-              `(standard_name ILIKE ${nameParam} OR raw_name ILIKE ${rawParam} OR brand ILIKE ${brandParam})`
-            )
+          // Allocate budget by category weight so high-impact parts (GPU/CPU) can use more budget.
+          const categoryWeights: Record<string, number> = {
+            'graphics-card': 0.35,
+            'processor': 0.20,
+            'motherboard': 0.12,
+            'ram': 0.10,
+            'ssd': 0.08,
+            'power-supply': 0.08,
+            'cpu-cooler': 0.07,
           }
+          const defaultWeight = 1 / Math.max(buildSpec.components.length, 1)
+          const weight = categoryWeights[category] ?? defaultWeight
+          const componentBudget = Math.floor(budgetLimit * weight)
+          const componentCeiling = Math.max(1, Math.floor(componentBudget * 1.5))
+
+          // Keep category-level ceiling, but much less restrictive than equal split.
+          filters.push(`price_bdt <= $${params.length + 1}`)
+          params.push(componentCeiling)
+
+          // NOTE: modelHint is intentionally NOT used as a hard SQL filter.
+          // Hard filtering often forces cheap/limited matches and drags a high-budget build far below target.
+          // We keep broad in-stock candidates and let budget/selection logic choose stronger parts.
 
           const whereClause = `WHERE ${filters.join(' AND ')}`
 
@@ -729,54 +804,49 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
                 MAX(price_bdt) AS max_price,
                 AVG(price_bdt) AS avg_price,
                 COUNT(DISTINCT vendor_name) AS vendor_count,
-                COUNT(*) AS total_listings
+                COUNT(*) AS total_listings,
+                (
+                  SELECT ap2.raw_name
+                  FROM all_products ap2
+                  WHERE ap2.category = $1
+                    AND ap2.standard_name = all_products.standard_name
+                    AND ap2.brand = all_products.brand
+                    AND ap2.price_bdt IS NOT NULL
+                    AND ap2.price_bdt > 0
+                    AND ap2.availability_status = 'in_stock'
+                  ORDER BY ap2.price_bdt ASC
+                  LIMIT 1
+                ) AS sample_raw_name,
+                (
+                  SELECT ap2.vendor_name
+                  FROM all_products ap2
+                  WHERE ap2.category = $1
+                    AND ap2.standard_name = all_products.standard_name
+                    AND ap2.brand = all_products.brand
+                    AND ap2.price_bdt IS NOT NULL
+                    AND ap2.price_bdt > 0
+                    AND ap2.availability_status = 'in_stock'
+                  ORDER BY ap2.price_bdt ASC
+                  LIMIT 1
+                ) AS sample_vendor_name
               FROM all_products
               ${whereClause}
               GROUP BY standard_name, brand
-              -- For a given ceiling, we want the most expensive viable options under that ceiling.
-              ORDER BY min_price DESC
-              LIMIT 40
+            ),
+            top_picks AS (
+              SELECT * FROM aggregated ORDER BY min_price DESC LIMIT 150
+            ),
+            bottom_picks AS (
+              SELECT * FROM aggregated ORDER BY min_price ASC LIMIT 150
             )
-            SELECT *
-            FROM aggregated
+            -- Combine both ends of the price spectrum so the selector can start high
+            -- (pick most expensive under ceiling) and step down to genuinely cheap parts.
+            SELECT * FROM top_picks
+            UNION
+            SELECT * FROM bottom_picks
           `
 
-          let products = await db.query(sql, params)
-
-          // Fallback: if the modelHint was too strict and returned nothing, retry without it
-          if ((!products || products.length === 0) && modelHint) {
-            const relaxedFilters = [
-              'category = $1',
-              'price_bdt IS NOT NULL',
-              'price_bdt > 0',
-              `availability_status = $2`,
-              `price_bdt <= $3`
-            ]
-            const relaxedParams: any[] = [category, 'in_stock', componentBudget * 1.2]
-
-            const relaxedWhere = `WHERE ${relaxedFilters.join(' AND ')}`
-            const relaxedSql = `
-              WITH aggregated AS (
-                SELECT
-                  standard_name,
-                  brand,
-                  MIN(price_bdt) AS min_price,
-                  MAX(price_bdt) AS max_price,
-                  AVG(price_bdt) AS avg_price,
-                  COUNT(DISTINCT vendor_name) AS vendor_count,
-                  COUNT(*) AS total_listings
-                FROM all_products
-                ${relaxedWhere}
-                GROUP BY standard_name, brand
-                ORDER BY min_price DESC
-                LIMIT 40
-              )
-              SELECT *
-              FROM aggregated
-            `
-
-            products = await db.query(relaxedSql, relaxedParams)
-          }
+          const products = await db.query(sql, params)
 
           // Map raw rows into CPUProduct objects
           let mappedProducts: CPUProduct[] = products.map((p: any) => ({
@@ -790,7 +860,21 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
             total_listings: p.total_listings,
             vendors: [],
             images: [],
-            price_entries: []
+            price_entries: p.sample_raw_name
+              ? [
+                  {
+                    id: `${p.standard_name}-${p.sample_vendor_name || 'unknown'}`,
+                    vendor_name: p.sample_vendor_name || 'unknown',
+                    raw_name: p.sample_raw_name,
+                    price_bdt: p.min_price,
+                    availability_status: 'in_stock',
+                    product_url: '',
+                    image_url: null,
+                    scraped_at: '',
+                    description: null,
+                  },
+                ]
+              : []
           }))
 
           // Prefer products that have prices from multiple vendors (more trustworthy / popular),
@@ -816,12 +900,13 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
 
       await db.close()
 
-      // Choose specific products per category so that the total stays under the overall budget when possible.
+      // Choose specific products per category so that the total falls within a target budget window.
       const categoryIds = Object.keys(buildProducts)
       const choices: Record<string, number> = {}
+      const targetMin = budgetLimit > 0 ? Math.floor(budgetLimit * 0.9) : 0
+      const targetMax = budgetLimit > 0 ? Math.ceil(budgetLimit * 1.1) : Number.POSITIVE_INFINITY
 
       // Start by picking the most expensive option under the ceiling for each category
-      let total = 0
       for (const categoryId of categoryIds) {
         const list = buildProducts[categoryId] as CPUProduct[]
         if (!list.length) {
@@ -830,11 +915,89 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
         }
         const idx = list.length - 1
         choices[categoryId] = idx
-        total += list[idx].min_price || 0
       }
 
       // Enforce basic CPU / motherboard platform compatibility on the chosen items
       enforceCpuMotherboardCompatibility(buildProducts, choices)
+
+      const computeTotalFromChoices = () =>
+        categoryIds.reduce((sum, categoryId) => {
+          const list = buildProducts[categoryId] as CPUProduct[]
+          const idx = choices[categoryId]
+          if (!list.length || idx == null || idx < 0 || idx >= list.length) return sum
+          return sum + (list[idx].min_price || 0)
+        }, 0)
+
+      // If we exceed the allowed max window, step down parts greedily until we're inside it.
+      let total = computeTotalFromChoices()
+      if (Number.isFinite(targetMax) && total > targetMax) {
+        let safety = 0
+        while (total > targetMax && safety < 500) {
+          safety += 1
+          let bestCategory: string | null = null
+          let bestSaving = -1
+
+          for (const categoryId of categoryIds) {
+            const list = buildProducts[categoryId] as CPUProduct[]
+            const idx = choices[categoryId]
+            if (!list.length || idx == null || idx <= 0 || idx >= list.length) continue
+            const currentPrice = list[idx].min_price || 0
+            const cheaperPrice = list[idx - 1].min_price || 0
+            const saving = currentPrice - cheaperPrice
+            if (saving > bestSaving) {
+              bestSaving = saving
+              bestCategory = categoryId
+            }
+          }
+
+          if (!bestCategory) break
+          choices[bestCategory] = (choices[bestCategory] || 0) - 1
+
+          // Only re-run CPU/motherboard compatibility if the processor was changed,
+          // otherwise compatibility keeps pushing the motherboard back up and undoing savings.
+          if (bestCategory === 'processor') {
+            enforceCpuMotherboardCompatibility(buildProducts, choices)
+          }
+
+          total = computeTotalFromChoices()
+        }
+      }
+
+      // If we're below the lower target window, upgrade parts greedily until we're inside it
+      // (without overshooting targetMax). This handles cases where the initial "most expensive
+      // under ceiling" was mid-range because the category has limited high-end stock.
+      if (total < targetMin) {
+        let safety = 0
+        while (total < targetMin && safety < 500) {
+          safety += 1
+          let bestCategory: string | null = null
+          let bestCost = Number.POSITIVE_INFINITY
+
+          for (const categoryId of categoryIds) {
+            const list = buildProducts[categoryId] as CPUProduct[]
+            const idx = choices[categoryId]
+            if (!list.length || idx == null || idx < 0 || idx >= list.length - 1) continue
+            const currentPrice = list[idx].min_price || 0
+            const nextPrice = list[idx + 1].min_price || 0
+            const extraCost = nextPrice - currentPrice
+            if (extraCost <= 0) continue
+            // Prefer the cheapest upgrade step that keeps us under targetMax.
+            if (total + extraCost <= targetMax && extraCost < bestCost) {
+              bestCost = extraCost
+              bestCategory = categoryId
+            }
+          }
+
+          if (!bestCategory) break
+          choices[bestCategory] = (choices[bestCategory] || 0) + 1
+
+          if (bestCategory === 'processor') {
+            enforceCpuMotherboardCompatibility(buildProducts, choices)
+          }
+
+          total = computeTotalFromChoices()
+        }
+      }
 
       // Reorder each category's list so the chosen item is first
       for (const categoryId of categoryIds) {
@@ -864,6 +1027,7 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
         buildSpec,
         budget: aiAnalysis.budget,
         totalBuildCost,
+        targetBudgetRange: budgetLimit > 0 ? { min: targetMin, max: targetMax } : null,
         aiAnalysis
       })
     }
