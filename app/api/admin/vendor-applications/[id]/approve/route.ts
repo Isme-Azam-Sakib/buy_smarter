@@ -8,6 +8,9 @@ export async function POST(
 ) {
   try {
     const session = await requireAdmin()
+    if (session.role !== 'superadmin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     const applicationId = parseInt(params.id)
 
     if (isNaN(applicationId)) {

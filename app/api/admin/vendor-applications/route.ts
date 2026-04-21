@@ -4,7 +4,10 @@ import { getAllVendorApplications } from '@/lib/vendor-db'
 
 export async function GET() {
   try {
-    await requireAdmin()
+    const session = await requireAdmin()
+    if (session.role !== 'superadmin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     const applications = await getAllVendorApplications()
     return NextResponse.json({ applications })
   } catch (error: any) {

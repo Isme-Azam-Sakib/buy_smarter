@@ -7,9 +7,16 @@ import { CustomInput } from '@/components/ui/CustomInput'
 interface VendorAuthFormProps {
   defaultMode?: 'login' | 'register'
   onClose?: () => void
+  onAuthSuccess?: () => void
+  redirectPath?: string
 }
 
-export default function VendorAuthForm({ defaultMode = 'login', onClose }: VendorAuthFormProps) {
+export default function VendorAuthForm({
+  defaultMode = 'login',
+  onClose,
+  onAuthSuccess,
+  redirectPath = '/admin/dashboard',
+}: VendorAuthFormProps) {
   const router = useRouter()
   const [mode, setMode] = useState<'login' | 'register'>(defaultMode)
   const [formData, setFormData] = useState({
@@ -49,12 +56,13 @@ export default function VendorAuthForm({ defaultMode = 'login', onClose }: Vendo
       }
 
       // Redirect to admin dashboard (vendors use /admin routes)
+      onAuthSuccess?.()
       if (onClose) {
         onClose()
       }
       // Redirect after a brief moment to ensure state updates
       setTimeout(() => {
-        router.push('/admin/dashboard')
+        router.push(redirectPath)
         router.refresh()
       }, 300)
     } catch (err: any) {

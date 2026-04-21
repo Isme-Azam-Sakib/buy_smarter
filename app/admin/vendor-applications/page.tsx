@@ -6,7 +6,10 @@ export const dynamic = 'force-dynamic'
 
 export default async function VendorApplicationsPage() {
   try {
-    await requireAdmin()
+    const session = await requireAdmin()
+    if (session.role !== 'superadmin') {
+      redirect('/admin/dashboard')
+    }
   } catch (error: any) {
     if (error.message === 'Unauthorized') {
       redirect('/admin/login')

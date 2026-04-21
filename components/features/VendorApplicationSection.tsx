@@ -139,6 +139,11 @@ export default function VendorApplicationSection() {
       <VendorAuthModal
         isOpen={showAuthModal}
         onClose={() => setShowAuthModal(false)}
+        onAuthSuccess={() => {
+          setIsVendorLoggedIn(true)
+          setShowApplicationModal(true)
+        }}
+        redirectPath="/"
       />
       
       <VendorApplicationModal

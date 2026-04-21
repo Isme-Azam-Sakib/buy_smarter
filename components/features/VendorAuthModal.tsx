@@ -6,9 +6,16 @@ import { X } from 'lucide-react'
 interface VendorAuthModalProps {
   isOpen: boolean
   onClose: () => void
+  onAuthSuccess?: () => void
+  redirectPath?: string
 }
 
-export default function VendorAuthModal({ isOpen, onClose }: VendorAuthModalProps) {
+export default function VendorAuthModal({
+  isOpen,
+  onClose,
+  onAuthSuccess,
+  redirectPath,
+}: VendorAuthModalProps) {
   if (!isOpen) return null
 
   return (
@@ -43,7 +50,11 @@ export default function VendorAuthModal({ isOpen, onClose }: VendorAuthModalProp
             </ul>
           </div>
           <div className="p-6 flex items-center justify-center">
-            <VendorAuthForm onClose={onClose} />
+            <VendorAuthForm
+              onClose={onClose}
+              onAuthSuccess={onAuthSuccess}
+              redirectPath={redirectPath}
+            />
           </div>
         </div>
       </div>
