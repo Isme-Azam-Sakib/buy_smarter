@@ -8,6 +8,13 @@ import { CPUProduct } from '@/lib/types'
 // Initialize Gemini lazily in the handler to ensure env vars are loaded
 let genAI: GoogleGenAI | null = null
 
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash']
+const OPENROUTER_MODELS = [
+  process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash',
+  'google/gemini-2.0-flash-001',
+]
+const AI_MAX_RETRIES = 2
+
 function getGenAI(): GoogleGenAI | null {
   if (genAI) return genAI
   
@@ -28,6 +35,204 @@ function getGenAI(): GoogleGenAI | null {
   // But we can also pass it explicitly
   genAI = new GoogleGenAI({ apiKey })
   return genAI
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isHighDemandError(error: any): boolean {
+  const errorMessage = error?.message || String(error || '')
+  const statusCode = typeof error?.status === 'number' ? error.status : 0
+  return (
+    statusCode === 503 ||
+    errorMessage.includes('high demand') ||
+    errorMessage.includes('UNAVAILABLE')
+  )
+}
+
+function isQuotaError(error: any): boolean {
+  const errorMessage = error?.message || String(error || '')
+  const statusCode = typeof error?.status === 'number' ? error.status : 0
+  return (
+    statusCode === 429 ||
+    errorMessage.includes('RESOURCE_EXHAUSTED') ||
+    errorMessage.toLowerCase().includes('quota exceeded')
+  )
+}
+
+function extractBudgetFromQuery(query: string): { min: number; max: number } | null {
+  const q = query.toLowerCase()
+
+  // "under 200k", "within 80k", "below 50000", "under 2 lac"
+  const underMatch = q.match(/\b(?:under|within|below|upto|up to|max)\s+(\d+(?:\.\d+)?)\s*(k|m|lac|lakh)?\b/i)
+  if (underMatch) {
+    const value = parseFloat(underMatch[1])
+    const unit = (underMatch[2] || '').toLowerCase()
+    let max = value
+    if (unit === 'k') max = value * 1000
+    if (unit === 'm') max = value * 1000000
+    if (unit === 'lac' || unit === 'lakh') max = value * 100000
+    return { min: 0, max: Math.round(max) }
+  }
+
+  // Any plain 4-6 digit number as budget hint
+  const numberMatch = q.match(/\b(\d{4,6})\b/)
+  if (numberMatch) {
+    const max = parseInt(numberMatch[1], 10)
+    if (!Number.isNaN(max)) return { min: 0, max }
+  }
+
+  return null
+}
+
+function fallbackAnalyzeQuery(query: string) {
+  const q = query.toLowerCase()
+  const budget = extractBudgetFromQuery(query)
+
+  const useCase = q.includes('editing')
+    ? 'editing'
+    : q.includes('gaming')
+      ? 'gaming'
+      : q.includes('stream')
+        ? 'streaming'
+        : null
+
+  const isBuild = /\b(build|pc build|full pc|complete pc|gaming pc|editing pc)\b/i.test(q)
+  if (isBuild || (q.includes('pc') && !!budget)) {
+    return {
+      type: 'build',
+      category: null,
+      budget,
+      productType: null,
+      useCase,
+      message: 'Using backup analyzer because AI is temporarily unavailable. Showing a practical build from in-stock products.',
+      reasoning: 'Fallback parser detected a PC build request.',
+    }
+  }
+
+  const categoryKeywords: Array<{ id: string; patterns: RegExp[] }> = [
+    { id: 'processor', patterns: [/\bcpu\b/i, /\bprocessor\b/i, /\bryzen\b/i, /\bcore i[3579]\b/i] },
+    { id: 'graphics-card', patterns: [/\bgpu\b/i, /\bgraphics\b/i, /\brtx\b/i, /\bgtx\b/i, /\bradeon\b/i] },
+    { id: 'ram', patterns: [/\bram\b/i, /\bddr4\b/i, /\bddr5\b/i, /\bmemory\b/i] },
+    { id: 'ssd', patterns: [/\bssd\b/i, /\bnvme\b/i, /\bm\.?2\b/i] },
+    { id: 'motherboard', patterns: [/\bmotherboard\b/i, /\bmobo\b/i, /\bam4\b/i, /\bam5\b/i, /\blga\b/i] },
+    { id: 'power-supply', patterns: [/\bpsu\b/i, /\bpower supply\b/i, /\bsmps\b/i] },
+    { id: 'cpu-cooler', patterns: [/\bcooler\b/i, /\bcpu cooler\b/i, /\bair cooler\b/i, /\baio\b/i] },
+  ]
+
+  const matched = categoryKeywords.find((entry) => entry.patterns.some((pattern) => pattern.test(q)))
+  if (matched) {
+    return {
+      type: 'single_product',
+      category: matched.id,
+      budget,
+      productType: null,
+      useCase,
+      message: 'Using backup analyzer because AI is temporarily unavailable. Showing the best in-stock matches.',
+      reasoning: 'Fallback parser detected a single-product request.',
+    }
+  }
+
+  return {
+    type: 'general_question',
+    category: null,
+    budget,
+    productType: null,
+    useCase,
+    message: 'AI is currently unavailable. Try a specific query like "best GPU under 30k" or "gaming PC under 100k".',
+    reasoning: 'Fallback parser could not confidently map the request.',
+  }
+}
+
+async function generateWithRetryAndFallback(ai: GoogleGenAI | null, contents: string) {
+  let lastError: any = null
+
+  const openRouterKey = process.env.OPENROUTER_API_KEY
+  if (openRouterKey) {
+    for (const model of OPENROUTER_MODELS) {
+      for (let attempt = 1; attempt <= AI_MAX_RETRIES; attempt++) {
+        try {
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${openRouterKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+              'X-Title': 'BuySmarter',
+            },
+            body: JSON.stringify({
+              model,
+              messages: [{ role: 'user', content: contents }],
+              temperature: 0.2,
+            }),
+          })
+
+          if (!response.ok) {
+            const errText = await response.text()
+            const err: any = new Error(errText || `OpenRouter error ${response.status}`)
+            err.status = response.status
+            throw err
+          }
+
+          const data: any = await response.json()
+          const text = data?.choices?.[0]?.message?.content?.trim() || ''
+          if (!text) {
+            throw new Error(`AI response is empty for OpenRouter model ${model}`)
+          }
+
+          return { text, model }
+        } catch (error: any) {
+          lastError = error
+          const retryable = isHighDemandError(error) || isQuotaError(error)
+          const isLastAttempt = attempt === AI_MAX_RETRIES
+
+          console.warn(
+            `[Search API] OpenRouter call failed (model=${model}, attempt=${attempt}/${AI_MAX_RETRIES}):`,
+            error?.message || String(error)
+          )
+
+          if (!retryable || isLastAttempt) break
+          await sleep(attempt * 800)
+        }
+      }
+    }
+  }
+
+  if (ai) {
+    for (const model of GEMINI_MODELS) {
+      for (let attempt = 1; attempt <= AI_MAX_RETRIES; attempt++) {
+        try {
+          const response = await ai.models.generateContent({
+            model,
+            contents,
+          })
+          const text = response.text || ''
+          if (!text) {
+            throw new Error(`AI response is empty for model ${model}`)
+          }
+          return { text, model }
+        } catch (error: any) {
+          lastError = error
+          const retryable = isHighDemandError(error)
+          const isLastAttempt = attempt === AI_MAX_RETRIES
+
+          console.warn(
+            `[Search API] Gemini call failed (model=${model}, attempt=${attempt}/${AI_MAX_RETRIES}):`,
+            error?.message || String(error)
+          )
+
+          if (!retryable || isLastAttempt) {
+            break
+          }
+
+          await sleep(attempt * 600)
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error('All AI models failed')
 }
 
 // Available categories for AI context
@@ -77,15 +282,15 @@ export async function POST(request: Request) {
   try {
     console.log('[Search API] Request received')
     
-    // Get Gemini AI instance (will check env var at runtime)
+    const openRouterKey = process.env.OPENROUTER_API_KEY
     const ai = getGenAI()
-    if (!ai) {
-      console.error('[Search API] Gemini AI not initialized - GEMINI_API_KEY missing')
+    if (!openRouterKey && !ai) {
+      console.error('[Search API] AI not initialized - OPENROUTER_API_KEY/GEMINI_API_KEY missing')
       return NextResponse.json(
         { 
-          error: 'AI service is not configured. Please set GEMINI_API_KEY.',
-          message: 'The AI search feature requires a Gemini API key. Please add GEMINI_API_KEY to your .env.local file and restart the server.',
-          details: 'GEMINI_API_KEY environment variable is not set or the server needs to be restarted.'
+          error: 'AI service is not configured. Please set OPENROUTER_API_KEY.',
+          message: 'The AI search feature requires an OpenRouter API key. Add OPENROUTER_API_KEY to your .env.local file and restart the server.',
+          details: 'OPENROUTER_API_KEY is missing. Optional fallback: GEMINI_API_KEY.'
         },
         { status: 500 }
       )
@@ -101,86 +306,71 @@ export async function POST(request: Request) {
       )
     }
 
-    // Get AI analysis using the new SDK
+    // Get AI analysis using Gemini, with fallback to local parser when Gemini is busy/quota-limited.
     console.log('[Search API] Calling Gemini AI...')
-    let text: string
+    let text: string | null = null
+    let aiAnalysis: any = null
     
     try {
-      // New SDK: Use ai.models.generateContent() with model name
       const prompt = `${SYSTEM_PROMPT}\n\nUser query: "${query}"\n\nAnalyze this query and respond with JSON only.`
       
-      const response = await ai.models.generateContent({
-        // Gemini 2.5 flash for query understanding
-        model: 'gemini-2.5-flash',
-        contents: prompt
-      })
-      
-      text = response.text || ''
-      if (!text) {
-        throw new Error('AI response is empty')
-      }
+      const result = await generateWithRetryAndFallback(ai, prompt)
+      text = result.text
       console.log('[Search API] AI raw response:', text.substring(0, 200))
     } catch (aiError: any) {
       console.error('[Search API] Gemini API error:', aiError)
       console.error('[Search API] Error details:', JSON.stringify(aiError, null, 2))
       
       const errorMessage = aiError.message || String(aiError)
-      const statusCode = typeof aiError.status === 'number' ? aiError.status : 500
-      const isHighDemand =
-        statusCode === 503 ||
-        errorMessage.includes('high demand') ||
-        errorMessage.includes('UNAVAILABLE')
-      
-      // Provide helpful error message (differentiate config vs high-demand issues)
-      const basePayload: any = {
-        error: isHighDemand ? 'AI model is busy' : 'AI service error',
-        details: isHighDemand
-          ? 'The Gemini model is currently under high demand. This is a temporary issue from Google. Please try your search again in a moment.'
-          : `Gemini API error: ${errorMessage.substring(0, 300)}. Please ensure: 1) Your API key is valid, 2) The Generative Language API is enabled in Google Cloud Console, 3) Your API key has the necessary permissions.`,
-        message: isHighDemand
-          ? 'The AI search is temporarily unavailable because the model is overloaded. Please try again shortly.'
-          : 'AI service is not available. Please check your API key configuration.',
-        rawError: errorMessage
-      }
+      const isHighDemand = isHighDemandError(aiError)
+      const quotaExceeded = isQuotaError(aiError)
 
-      if (!isHighDemand) {
-        basePayload.troubleshooting = {
-          step1: 'Go to https://console.cloud.google.com/apis/library',
-          step2: 'Search for "Generative Language API"',
-          step3: 'Enable the API for your project',
-          step4: 'Verify your API key has access to this API',
-          step5: 'Get a new API key from https://aistudio.google.com/app/apikey if needed',
-          step6: 'Restart your development server'
+      if (isHighDemand || quotaExceeded) {
+        aiAnalysis = fallbackAnalyzeQuery(query)
+        aiAnalysis.aiUnavailable = true
+        aiAnalysis.aiUnavailableReason = quotaExceeded ? 'quota_exceeded' : 'high_demand'
+        console.warn('[Search API] Using fallback analyzer due to temporary AI issue:', aiAnalysis.aiUnavailableReason)
+      } else {
+        // Provide helpful error message (differentiate config vs high-demand issues)
+        const basePayload: any = {
+          error: 'AI service error',
+          details: `AI provider error: ${errorMessage.substring(0, 300)}. Please verify OPENROUTER_API_KEY (or GEMINI_API_KEY fallback) and provider access.`,
+          message: 'AI service is not available. Please check your API key configuration.',
+          rawError: errorMessage,
+          troubleshooting: {
+            step1: 'Ensure OPENROUTER_API_KEY is present in .env.local',
+            step2: 'Verify the key is active in your OpenRouter dashboard',
+            step3: 'Check model access/quota for the selected model',
+            step4: 'Optional fallback: set GEMINI_API_KEY for direct Google calls',
+            step5: 'Restart your development server after env changes'
+          }
         }
+      
+        return NextResponse.json(
+          basePayload,
+          { status: 500 }
+        )
       }
-
-      return NextResponse.json(
-        basePayload,
-        { status: isHighDemand ? 503 : 500 }
-      )
     }
 
-    // Parse AI response (handle markdown code blocks if present)
-    let aiAnalysis: any
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        aiAnalysis = JSON.parse(jsonMatch[0])
-        console.log('[Search API] Parsed AI analysis:', aiAnalysis)
-      } else {
-        throw new Error('No JSON found in response')
+    if (!aiAnalysis) {
+      // Parse AI response (handle markdown code blocks if present)
+      try {
+        const jsonMatch = text?.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
+          aiAnalysis = JSON.parse(jsonMatch[0])
+          console.log('[Search API] Parsed AI analysis:', aiAnalysis)
+        } else {
+          throw new Error('No JSON found in response')
+        }
+      } catch (parseError) {
+        console.error('[Search API] Failed to parse AI response:', text)
+        console.error('[Search API] Parse error:', parseError)
+        aiAnalysis = fallbackAnalyzeQuery(query)
+        aiAnalysis.aiUnavailable = true
+        aiAnalysis.aiUnavailableReason = 'parse_error'
+        console.warn('[Search API] Falling back to local parser after AI parse failure')
       }
-    } catch (parseError) {
-      console.error('[Search API] Failed to parse AI response:', text)
-      console.error('[Search API] Parse error:', parseError)
-      return NextResponse.json(
-        { 
-          error: 'Failed to parse AI response',
-          rawResponse: text,
-          details: parseError instanceof Error ? parseError.message : 'Unknown parse error'
-        },
-        { status: 500 }
-      )
     }
 
     // Handle unavailable categories
@@ -397,11 +587,13 @@ ${formattedProducts.length === 0 ? 'No products found matching the criteria.' : 
 
 Provide a helpful, conversational response in the same language as the user's query. If products were found, mention the best/cheapest option. If no products found, suggest alternatives or explain why.`
 
-      const finalResult = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: finalPrompt
-      })
-      const finalText = finalResult.text || 'No response from AI'
+      let finalText = 'Here are the best matches currently available on our site.'
+      try {
+        const finalResult = await generateWithRetryAndFallback(ai, finalPrompt)
+        finalText = finalResult.text
+      } catch (finalAiError) {
+        console.warn('[Search API] Final summary generation failed, using fallback message:', finalAiError)
+      }
 
       return NextResponse.json({
         type: 'single_product',
@@ -452,11 +644,13 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
   "reasoning": "1-2 short sentences about why this build fits the budget and use case"
 }`
 
-      const buildResult = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: buildPrompt
-      })
-      const buildText = buildResult.text || '{}'
+      let buildText = '{}'
+      try {
+        const buildResult = await generateWithRetryAndFallback(ai, buildPrompt)
+        buildText = buildResult.text
+      } catch (buildAiError) {
+        console.warn('[Search API] Build spec generation failed:', buildAiError)
+      }
 
       let buildSpec: any
       try {
@@ -471,6 +665,21 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
       // Query database for each component
       const db = await getDatabase()
       const buildProducts: Record<string, CPUProduct[]> = {}
+
+      // Ensure we always have a component list to query, even when AI is unavailable.
+      if (!buildSpec?.components || !Array.isArray(buildSpec.components) || buildSpec.components.length === 0) {
+        const defaultCategories = ['processor', 'motherboard', 'ram', 'ssd', 'graphics-card', 'power-supply', 'cpu-cooler']
+        buildSpec = buildSpec || {}
+        buildSpec.components = defaultCategories
+          .filter(id => availableCategories.find(c => c.id === id))
+          .map(id => ({
+            category: id,
+            description: 'Auto-selected from in-stock products.',
+            modelHint: '',
+            priority: 'medium',
+          }))
+        buildSpec.reasoning = buildSpec.reasoning || 'Fallback build generated from in-stock products because AI planner was unavailable.'
+      }
 
       if (buildSpec?.components) {
         for (const component of buildSpec.components) {

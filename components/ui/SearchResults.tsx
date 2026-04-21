@@ -492,6 +492,14 @@ export default function SearchResults({ query, response, onClose }: SearchResult
     const knownSpecComponents = specComponents.filter((comp) =>
       CATEGORIES.some((c) => c.id === comp.category)
     )
+    const fallbackComponentsFromProducts = Object.keys(buildProducts).map((categoryId) => ({
+      category: categoryId,
+      description: 'Suggested from available in-stock products.',
+      modelHint: '',
+      priority: 'medium',
+    }))
+    const displayComponents =
+      knownSpecComponents.length > 0 ? knownSpecComponents : fallbackComponentsFromProducts
 
     const [searchState, setSearchState] = useState<
       Record<
@@ -524,9 +532,9 @@ export default function SearchResults({ query, response, onClose }: SearchResult
               ? patch.term
               : prev[categoryId]?.term ||
                 getModelOnlyHint(
-                  knownSpecComponents.find((c) => c.category === categoryId)?.modelHint
+                  displayComponents.find((c) => c.category === categoryId)?.modelHint
                 ) ||
-                knownSpecComponents.find((c) => c.category === categoryId)?.modelHint ||
+                displayComponents.find((c) => c.category === categoryId)?.modelHint ||
                 '',
           results: patch.results !== undefined ? patch.results : prev[categoryId]?.results || [],
           loading: patch.loading !== undefined ? patch.loading : prev[categoryId]?.loading || false,
@@ -542,9 +550,9 @@ export default function SearchResults({ query, response, onClose }: SearchResult
       const term =
         state?.term ||
         getModelOnlyHint(
-          knownSpecComponents.find((c) => c.category === categoryId)?.modelHint
+          displayComponents.find((c) => c.category === categoryId)?.modelHint
         ) ||
-        knownSpecComponents.find((c) => c.category === categoryId)?.modelHint ||
+        displayComponents.find((c) => c.category === categoryId)?.modelHint ||
         ''
 
       const runGenericSearch = async (messageIfEmpty?: string) => {
@@ -616,7 +624,7 @@ export default function SearchResults({ query, response, onClose }: SearchResult
       // if user didn’t search/select for a category, fall back to the API’s first suggestion.
       const selected: { categoryId: string; product: CPUProduct }[] = []
 
-      knownSpecComponents.forEach((spec) => {
+      displayComponents.forEach((spec) => {
         const categoryId = spec.category
         const state = searchState[categoryId]
         const explicit = state?.selected
@@ -643,11 +651,9 @@ export default function SearchResults({ query, response, onClose }: SearchResult
       router.push('/builder')
     }
 
-    const estimatedTotal = Object.values(searchState).reduce((sum, state) => {
-      if (state?.selected) {
-        return sum + (state.selected.min_price || 0)
-      }
-      return sum
+    const estimatedTotal = displayComponents.reduce((sum, comp) => {
+      const selected = searchState[comp.category]?.selected || buildProducts[comp.category]?.[0]
+      return sum + (selected?.min_price || 0)
     }, 0)
 
     return (
@@ -668,7 +674,7 @@ export default function SearchResults({ query, response, onClose }: SearchResult
               <p className="text-gray-900 font-medium">&quot;{query}&quot;</p>
             </div>
 
-            {knownSpecComponents.length > 0 && (
+            {displayComponents.length > 0 && (
               <div className="mb-6">
                 <h4 className="text-lg font-semibold text-gray-900 mb-3">
                   Recommended configuration overview
@@ -689,18 +695,27 @@ export default function SearchResults({ query, response, onClose }: SearchResult
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {knownSpecComponents.map((comp) => {
+                      {displayComponents.map((comp) => {
                         const category = CATEGORIES.find((c) => c.id === comp.category)
+                        const selectedProduct =
+                          searchState[comp.category]?.selected ||
+                          buildProducts[comp.category]?.[0]
+                        const suggestedText = selectedProduct
+                          ? getFormattedProductName(selectedProduct)
+                          : getModelOnlyHint(comp.modelHint) || comp.modelHint || '—'
+                        const detailsText = selectedProduct
+                          ? `${formatPrice(selectedProduct.min_price)}${selectedProduct.brand ? ` · ${selectedProduct.brand}` : ''}`
+                          : comp.description || '—'
                         return (
                           <tr key={comp.category}>
                             <td className="px-4 py-3 align-top whitespace-nowrap text-sm font-medium text-gray-900">
                               {category?.name || comp.category}
                             </td>
                             <td className="px-4 py-3 align-top text-sm text-gray-800">
-                              {getModelOnlyHint(comp.modelHint) || comp.modelHint || '—'}
+                              {suggestedText}
                             </td>
                             <td className="px-4 py-3 align-top text-sm text-gray-600">
-                              {comp.description || '—'}
+                              {detailsText}
                             </td>
                           </tr>
                         )
@@ -712,12 +727,13 @@ export default function SearchResults({ query, response, onClose }: SearchResult
             )}
 
             <div className="space-y-5 mb-6">
-              {knownSpecComponents.map((comp) => {
+              {displayComponents.map((comp) => {
                 const category = CATEGORIES.find((c) => c.id === comp.category)
                 const state = searchState[comp.category] || {
                   term: getModelOnlyHint(comp.modelHint) || comp.modelHint || '',
-                  results: [],
+                  results: buildProducts[comp.category] || [],
                   loading: false,
+                  selected: buildProducts[comp.category]?.[0],
                 }
                 return (
                   <div
