@@ -1,0 +1,39 @@
+\begin{table}[h!]
+\centering
+\caption{Unit Test Cases Summary}
+\begin{tabular}{|p{10cm}|c|}
+\hline
+\textbf{Test} & \textbf{Status} \\
+\hline
+Database connection opens successfully & PASS \\
+\hline
+Products API returns paginated list for valid category & PASS \\
+\hline
+Products API applies brand filter correctly & PASS \\
+\hline
+Product detail API returns product by category and ID & PASS \\
+\hline
+Similar products API returns related in-stock products & PASS \\
+\hline
+Admin login sets session cookie for valid credentials & PASS \\
+\hline
+Vendor login rejects invalid password & PASS \\
+\hline
+Vendor application API validates email format & PASS \\
+\hline
+Vendor application approval creates vendor record & PASS \\
+\hline
+Admin products API restricts vendor view to assigned vendor & PASS \\
+\hline
+Bulk scraper API starts SSE stream successfully & PASS \\
+\hline
+Single product refresh API parses scraper JSON output & PASS \\
+\hline
+AI search API handles missing GEMINI\_API\_KEY gracefully & FAIL \\
+\hline
+Scraper cancel endpoint terminates active process reliably & FAIL \\
+\hline
+Product update API rejects unauthorized role access in all paths & FAIL \\
+\hline
+\end{tabular}
+\end{table}
