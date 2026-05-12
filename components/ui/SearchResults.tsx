@@ -512,7 +512,35 @@ export default function SearchResults({ query, response, onClose }: SearchResult
           selected?: CPUProduct
         }
       >
-    >({})
+    >(() => {
+      // Pre-populate every component with the AI-picked product and alternatives
+      // so the user sees everything as already selected and can simply re-pick.
+      const initial: Record<
+        string,
+        {
+          term: string
+          results: CPUProduct[]
+          loading: boolean
+          error?: string
+          selected?: CPUProduct
+        }
+      > = {}
+
+      displayComponents.forEach((comp) => {
+        const products = buildProducts[comp.category] || []
+        initial[comp.category] = {
+          term:
+            getModelOnlyHint(comp.modelHint) ||
+            comp.modelHint ||
+            '',
+          results: products,
+          loading: false,
+          selected: products[0],
+        }
+      })
+
+      return initial
+    })
 
     const updateComponentState = (
       categoryId: string,
@@ -651,10 +679,28 @@ export default function SearchResults({ query, response, onClose }: SearchResult
       router.push('/builder')
     }
 
+    // Mirror the exact fallback chain used in the row render so the total
+    // always reflects what the UI shows as "Pre-selected".
     const estimatedTotal = displayComponents.reduce((sum, comp) => {
-      const selected = searchState[comp.category]?.selected || buildProducts[comp.category]?.[0]
+      const state = searchState[comp.category]
+      const fallbackList = buildProducts[comp.category] || []
+      const selected =
+        state?.selected ||
+        state?.results?.[0] ||
+        fallbackList[0] ||
+        null
       return sum + (selected?.min_price || 0)
     }, 0)
+
+    // Target budget the user asked for (e.g. "under 200k"). Used to show how
+    // the current selections compare to what the user requested.
+    const targetBudgetMax: number | null =
+      typeof response.budget?.max === 'number' && response.budget.max > 0
+        ? response.budget.max
+        : null
+
+    const budgetDelta =
+      targetBudgetMax != null && estimatedTotal > 0 ? estimatedTotal - targetBudgetMax : 0
 
     return (
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -729,18 +775,35 @@ export default function SearchResults({ query, response, onClose }: SearchResult
             <div className="space-y-5 mb-6">
               {displayComponents.map((comp) => {
                 const category = CATEGORIES.find((c) => c.id === comp.category)
+                const fallbackList = buildProducts[comp.category] || []
                 const state = searchState[comp.category] || {
                   term: getModelOnlyHint(comp.modelHint) || comp.modelHint || '',
-                  results: buildProducts[comp.category] || [],
+                  results: fallbackList,
                   loading: false,
-                  selected: buildProducts[comp.category]?.[0],
+                  selected: fallbackList[0],
                 }
+                // Ensure we always have a concrete selected product when at least
+                // one option exists in results or the server-provided fallback.
+                const selectedProduct =
+                  state.selected || state.results[0] || fallbackList[0] || null
+                const selectedVendor = selectedProduct
+                  ? getBestVendorEntry(selectedProduct)
+                  : null
+                const alternatives = (state.results.length > 0
+                  ? state.results
+                  : fallbackList
+                ).filter(
+                  (p) =>
+                    !selectedProduct ||
+                    p.standard_name !== selectedProduct.standard_name
+                )
+
                 return (
                   <div
                     key={comp.category}
                     className="bg-gray-50 border border-gray-200 rounded-lg p-4"
                   >
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
                       <div>
                         <h5 className="font-semibold text-gray-900">
                           {category?.name || comp.category}
@@ -751,12 +814,40 @@ export default function SearchResults({ query, response, onClose }: SearchResult
                           </p>
                         )}
                       </div>
-                      {state.selected && (
-                        <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-1 rounded-full">
-                          Selected
+                      {selectedProduct && (
+                        <span className="text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded-full">
+                          Pre-selected
                         </span>
                       )}
                     </div>
+
+                    {selectedProduct ? (
+                      <div className="rounded-lg border-2 border-purple-500 bg-white p-3 mb-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 line-clamp-2">
+                              {getFormattedProductName(selectedProduct)}
+                            </p>
+                            {selectedVendor && (
+                              <p className="text-[11px] text-gray-600 mt-1">
+                                Vendor:{' '}
+                                <span className="font-medium">
+                                  {getVendorDisplayName(selectedVendor.vendor_name)}
+                                </span>
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-sm font-bold text-purple-700 whitespace-nowrap">
+                            {formatPrice(selectedProduct.min_price)}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-500 italic mb-2">
+                        No in-stock product found. Search below to pick one.
+                      </p>
+                    )}
+
                     <div className="flex flex-col gap-2">
                       <div className="flex gap-2">
                         <input
@@ -777,66 +868,64 @@ export default function SearchResults({ query, response, onClose }: SearchResult
                         <button
                           onClick={() => handleSearchComponent(comp.category)}
                           disabled={state.loading}
-                          className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                          className="px-4 py-2 bg-white border border-purple-300 text-purple-700 text-sm font-medium rounded-lg hover:bg-purple-50 disabled:opacity-50"
                         >
-                          {state.loading ? 'Searching...' : 'Search & select'}
+                          {state.loading ? 'Searching...' : 'Search other options'}
                         </button>
                       </div>
                       {state.error && (
                         <p className="text-xs text-red-600">{state.error}</p>
                       )}
-                      {state.results.length > 0 && (
-                        <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                          {state.results.map((product) => {
-                            const isActive =
-                              state.selected &&
-                              state.selected.standard_name ===
-                                product.standard_name
-                            const bestVendor = getBestVendorEntry(product)
-                            return (
-                              <button
-                                key={product.id}
-                                type="button"
-                                onClick={() =>
-                                  updateComponentState(comp.category, {
-                                    selected: product,
-                                  })
-                                }
-                                className={`w-full text-left px-3 py-2 rounded-lg border text-xs ${
-                                  isActive
-                                    ? 'border-purple-500 bg-purple-50'
-                                    : 'border-gray-200 hover:bg-gray-100'
-                                }`}
-                              >
-                                <div className="flex flex-col gap-0.5">
-                                  <div className="flex justify-between items-center gap-2">
-                                    <span className="font-medium text-gray-900 line-clamp-1">
-                                      {getFormattedProductName(product)}
-                                    </span>
-                                    <span className="text-gray-700 font-semibold whitespace-nowrap">
-                                      {formatPrice(product.min_price)}
-                                    </span>
-                                  </div>
-                                  {bestVendor && (
-                                    <div className="flex justify-between items-center gap-2 text-[11px] text-gray-600">
-                                      <span className="line-clamp-1">
-                                        Vendor:{' '}
-                                        <span className="font-medium">
-                                          {getVendorDisplayName(bestVendor.vendor_name)}
-                                        </span>
+                      {alternatives.length > 0 && (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-xs font-medium text-gray-700 hover:text-purple-700 select-none">
+                            Show {alternatives.length} other option
+                            {alternatives.length === 1 ? '' : 's'}
+                          </summary>
+                          <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                            {alternatives.map((product) => {
+                              const bestVendor = getBestVendorEntry(product)
+                              return (
+                                <button
+                                  key={product.id}
+                                  type="button"
+                                  onClick={() =>
+                                    updateComponentState(comp.category, {
+                                      selected: product,
+                                    })
+                                  }
+                                  className="w-full text-left px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-100 text-xs"
+                                >
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex justify-between items-center gap-2">
+                                      <span className="font-medium text-gray-900 line-clamp-1">
+                                        {getFormattedProductName(product)}
                                       </span>
-                                      {typeof bestVendor.price_bdt === 'number' && (
-                                        <span className="whitespace-nowrap">
-                                          {formatPrice(bestVendor.price_bdt)}
-                                        </span>
-                                      )}
+                                      <span className="text-gray-700 font-semibold whitespace-nowrap">
+                                        {formatPrice(product.min_price)}
+                                      </span>
                                     </div>
-                                  )}
-                                </div>
-                              </button>
-                            )
-                          })}
-                        </div>
+                                    {bestVendor && (
+                                      <div className="flex justify-between items-center gap-2 text-[11px] text-gray-600">
+                                        <span className="line-clamp-1">
+                                          Vendor:{' '}
+                                          <span className="font-medium">
+                                            {getVendorDisplayName(bestVendor.vendor_name)}
+                                          </span>
+                                        </span>
+                                        {typeof bestVendor.price_bdt === 'number' && (
+                                          <span className="whitespace-nowrap">
+                                            {formatPrice(bestVendor.price_bdt)}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </details>
                       )}
                     </div>
                   </div>
@@ -845,18 +934,34 @@ export default function SearchResults({ query, response, onClose }: SearchResult
             </div>
 
             <div className="bg-purple-50 border-2 border-purple-200 rounded-lg p-4 mb-6">
-              <div className="flex items-center justify-between">
-                <span className="text-lg font-semibold text-gray-900">
-                  Estimated Build Cost (from your selections):
-                </span>
-                <span className="text-2xl font-bold text-purple-600">
-                  {estimatedTotal > 0 ? formatPrice(estimatedTotal) : '—'}
-                </span>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <span className="text-lg font-semibold text-gray-900">
+                    Build Total:
+                  </span>
+                  <p className="mt-1 text-xs text-purple-700">
+                    Parts are pre-selected from our stock. Re-pick any row above to customize.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-bold text-purple-600">
+                    {estimatedTotal > 0 ? formatPrice(estimatedTotal) : '—'}
+                  </span>
+                  {targetBudgetMax != null && estimatedTotal > 0 && (
+                    <p className="text-xs mt-1 font-medium">
+                      {budgetDelta <= 0 ? (
+                        <span className="text-green-600">
+                          Within budget of {formatPrice(targetBudgetMax)}
+                        </span>
+                      ) : (
+                        <span className="text-orange-600">
+                          {formatPrice(budgetDelta)} over your {formatPrice(targetBudgetMax)} budget
+                        </span>
+                      )}
+                    </p>
+                  )}
+                </div>
               </div>
-              <p className="mt-1 text-xs text-purple-700">
-                You can fine-tune each part using the search boxes above. When
-                you are happy, apply the build to the PC Builder.
-              </p>
             </div>
 
             <div className="flex gap-3">

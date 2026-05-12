@@ -1,8 +1,32 @@
 import { NextResponse } from 'next/server'
 import { spawn, ChildProcess } from 'child_process'
+import fs from 'fs'
+import path from 'path'
 
 function getPythonCommand() {
-  return process.env.PYTHON_PATH || 'python'
+  // 1) Respect explicit override
+  if (process.env.PYTHON_PATH && process.env.PYTHON_PATH.trim()) {
+    return process.env.PYTHON_PATH.trim()
+  }
+
+  // 2) Prefer project-local virtualenv if present
+  const cwd = process.cwd()
+  const venvWin = path.join(cwd, '.venv', 'Scripts', 'python.exe')
+  const venvUnix = path.join(cwd, '.venv', 'bin', 'python')
+
+  if (fs.existsSync(venvWin)) {
+    return venvWin
+  }
+  if (fs.existsSync(venvUnix)) {
+    return venvUnix
+  }
+
+  // 3) Fallbacks: Windows launcher, then system python
+  if (process.platform === 'win32') {
+    return 'py'
+  }
+
+  return 'python3'
 }
 
 // Store active scraper processes for cancellation

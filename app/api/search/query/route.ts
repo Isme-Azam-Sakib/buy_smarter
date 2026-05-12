@@ -68,16 +68,28 @@ function isQuotaError(error: any): boolean {
 function extractBudgetFromQuery(query: string): { min: number; max: number } | null {
   const q = query.toLowerCase()
 
-  // "under 200k", "within 80k", "below 50000", "under 2 lac"
-  const underMatch = q.match(/\b(?:under|within|below|upto|up to|max)\s+(\d+(?:\.\d+)?)\s*(k|m|lac|lakh)?\b/i)
-  if (underMatch) {
-    const value = parseFloat(underMatch[1])
-    const unit = (underMatch[2] || '').toLowerCase()
-    let max = value
-    if (unit === 'k') max = value * 1000
-    if (unit === 'm') max = value * 1000000
-    if (unit === 'lac' || unit === 'lakh') max = value * 100000
-    return { min: 0, max: Math.round(max) }
+  const toBdt = (rawValue: string, rawUnit: string | undefined): number => {
+    const value = parseFloat(rawValue)
+    const unit = (rawUnit || '').toLowerCase()
+    let amount = value
+    if (unit === 'k') amount = value * 1000
+    if (unit === 'm') amount = value * 1000000
+    if (unit === 'lac' || unit === 'lakh') amount = value * 100000
+    return Math.round(amount)
+  }
+
+  // "under 200k", "within 80k", "below 50000", "at 2 lac", "around 150000"
+  const keywordMatch = q.match(
+    /\b(?:under|within|below|upto|up\s*to|max|at|around|about|for|of|budget|price)\s+(\d+(?:\.\d+)?)\s*(k|m|lac|lakh)?\b/i
+  )
+  if (keywordMatch) {
+    return { min: 0, max: toBdt(keywordMatch[1], keywordMatch[2]) }
+  }
+
+  // Any number with a unit suffix anywhere in the query (e.g. "200k bdt", "2 lac pc")
+  const suffixMatch = q.match(/\b(\d+(?:\.\d+)?)\s*(k|m|lac|lakh)\b/i)
+  if (suffixMatch) {
+    return { min: 0, max: toBdt(suffixMatch[1], suffixMatch[2]) }
   }
 
   // Any plain 4-6 digit number as budget hint
@@ -783,7 +795,16 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
           const defaultWeight = 1 / Math.max(buildSpec.components.length, 1)
           const weight = categoryWeights[category] ?? defaultWeight
           const componentBudget = Math.floor(budgetLimit * weight)
-          const componentCeiling = Math.max(1, Math.floor(componentBudget * 1.5))
+          // Per-category ceiling is kept generous (3x weighted share, capped at the
+          // overall budget) so the final upgrade/step-down loop has enough headroom
+          // to actually reach the user's target budget window.
+          const componentCeiling = Math.max(
+            1,
+            Math.min(
+              Math.floor(budgetLimit * 1.1),
+              Math.max(Math.floor(componentBudget * 3), 1)
+            )
+          )
 
           // Keep category-level ceiling, but much less restrictive than equal split.
           filters.push(`price_bdt <= $${params.length + 1}`)
@@ -877,11 +898,23 @@ Respond in JSON ONLY (no markdown, no prose) with this shape:
               : []
           }))
 
-          // Prefer products that have prices from multiple vendors (more trustworthy / popular),
-          // but only as a soft preference: if there are any 3+ vendor items, use just those,
-          // otherwise fall back to all candidates.
+          // Prefer products stocked by multiple vendors (more trustworthy / popular),
+          // but DO NOT apply this filter if it would cap the build at mid-range pricing.
+          // Many high-end parts in BD (RTX 4080/4090, flagship boards, premium AIOs)
+          // are only stocked by 1-2 shops, and a hard `vendor_count >= 3` filter
+          // silently removes them and collapses expensive builds to 40-50% of budget.
           const withEnoughVendors = mappedProducts.filter(p => p.vendor_count >= 3)
-          mappedProducts = withEnoughVendors.length > 0 ? withEnoughVendors : mappedProducts
+          if (withEnoughVendors.length > 0) {
+            const maxAll = mappedProducts.reduce((m, p) => Math.max(m, p.min_price || 0), 0)
+            const maxFiltered = withEnoughVendors.reduce((m, p) => Math.max(m, p.min_price || 0), 0)
+            // Only trust the vendor filter if it keeps at least ~75% of the top-end
+            // available AND it still covers the category's weighted budget share.
+            const keepsTopEnd = maxAll === 0 || maxFiltered >= maxAll * 0.75
+            const coversBudget = maxFiltered >= componentBudget * 0.8
+            if (withEnoughVendors.length >= 5 && keepsTopEnd && coversBudget) {
+              mappedProducts = withEnoughVendors
+            }
+          }
 
           // For processors only, try to avoid obviously old / legacy CPUs when there are modern options.
           if (category === 'processor') {

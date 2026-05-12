@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import Header from '@/components/ui/Header'
 import Footer from '@/components/ui/Footer'
@@ -93,6 +94,11 @@ export default function BuilderPage() {
   const totalPrice = getTotalPrice()
 
   const [printMode, setPrintMode] = useState<'list' | 'quotation' | null>(null)
+  const [isMounted, setIsMounted] = useState(false)
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   const handlePrint = (mode: 'list' | 'quotation') => {
     setPrintMode(mode)
@@ -405,24 +411,30 @@ export default function BuilderPage() {
       {/* ── Print Styles ── */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
-          body * { visibility: hidden; }
-          #pc-print-content,
-          #pc-print-content * { visibility: visible; }
+          @page { size: A4; margin: 12mm; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            background: #fff !important;
+          }
+          body > *:not(#pc-print-content) {
+            display: none !important;
+          }
           #pc-print-content {
             display: block !important;
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            padding: 32px;
-            background: white;
+            position: static !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
             box-sizing: border-box;
           }
         }
       `}} />
 
-      {/* ── Print Content (hidden on screen, visible on print) ── */}
-      {printMode && (
+      {/* ── Print Content (portaled to body so siblings can be hidden cleanly) ── */}
+      {printMode && isMounted && createPortal(
         <div id="pc-print-content" style={{ display: 'none' }}>
           <div style={{ fontFamily: 'Arial, sans-serif', color: '#000' }}>
 
@@ -526,7 +538,8 @@ export default function BuilderPage() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </main>
   )
